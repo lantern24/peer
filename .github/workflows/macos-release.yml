@@ -1,10 +1,27 @@
 name: Package macOS (Apple Silicon)
-on: workflow_dispatch
+on:
+  workflow_dispatch:
+    inputs:
+      release-tag:
+        description: Existing release tag to build and upload (blank for artifact only)
+        type: string
+        required: false
+  workflow_call:
+    inputs:
+      release-tag:
+        type: string
+        required: true
+
+permissions:
+  contents: write
+
 jobs:
   bundle:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release-tag || github.sha }}
       - uses: dtolnay/rust-toolchain@stable
         with: { targets: aarch64-apple-darwin }
       - uses: actions/setup-node@v4
@@ -25,7 +42,17 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      - name: Archive app bundle
+        run: ditto -c -k --sequesterRsrc --keepParent target/aarch64-apple-darwin/release/bundle/macos/Peer.app Peer-macOS-arm64.app.zip
       - uses: actions/upload-artifact@v4
         with:
           name: Peer-macOS-arm64
-          path: target/aarch64-apple-darwin/release/bundle/macos/*.app
+          path: Peer-macOS-arm64.app.zip
+          if-no-files-found: error
+      - name: Upload release asset
+        if: inputs.release-tag != ''
+        run: gh release upload "$RELEASE_TAG" Peer-macOS-arm64.app.zip --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.release-tag }}

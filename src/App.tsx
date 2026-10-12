@@ -22,6 +22,7 @@ import {
   ArrowLeft,
 } from "lucide-react";
 import appIcon from "../assets/icon.svg";
+import { version as appVersion } from "../package.json";
 import { api } from "./api";
 import {
   defaultComparison,
@@ -1508,7 +1509,7 @@ export default function App() {
           {selectedFile && (
             <span>Tab width: {selectedFile.content.tabWidth}</span>
           )}
-          <span>Peer 0.1</span>
+          <span>Peer {appVersion}</span>
         </footer>
         {message && (
           <div className="toast" role="status">

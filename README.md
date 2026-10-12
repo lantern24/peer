@@ -26,6 +26,22 @@ The app is written to `target/aarch64-apple-darwin/release/bundle/macos/Peer.app
 
 The shared logo source is `assets/icon.svg`. After editing it, run `npm run icons` to regenerate the desktop icons; the header and welcome screen use the SVG directly.
 
+## Releases
+
+[Release Please](https://github.com/googleapis/release-please) runs on pushes to `main` and can also be dispatched manually on `main`. It maintains a release PR with version updates and a generated `CHANGELOG.md`. Merge that PR to create the GitHub release and its `vX.Y.Z` tag.
+
+The first release is **v0.1.0**. `.release-please-manifest.json` starts empty because no version has been released yet; Release Please fills it when preparing the first release PR. `initial-version` applies only to that first release, so it does not pin later releases. Use Conventional Commit messages (including squash-merge titles): `fix:` bumps the patch, `feat:` bumps the minor, and `!` or a `BREAKING CHANGE:` footer signals a breaking change. Before 1.0, breaking changes bump the minor rather than jumping to 1.0; after 1.0, they bump the major.
+
+`release-please-config.json` keeps `package.json`, `package-lock.json`, `src-tauri/tauri.conf.json`, the Cargo workspace version, and the `peer`/`peer-core` entries in `Cargo.lock` synchronized. The app footer reads the package version rather than a separate hard-coded label. The Cargo lockfile selector uses `name.value` because Release Please's TOML parser wraps scalar values with source-location metadata; dependency versions are left untouched.
+
+Repository setup:
+
+- When using the built-in `GITHUB_TOKEN`, enable **Settings → Actions → General → Workflow permissions → Allow GitHub Actions to create and approve pull requests**. The workflow requests the write permissions it needs.
+- For automatic CI on release PRs, add a `RELEASE_PLEASE_TOKEN` Actions secret containing a token with repository **Contents**, **Issues**, and **Pull requests** read/write permissions. Without it, the workflow uses `GITHUB_TOKEN`, whose generated PRs do not trigger other workflows. Run **Verify Peer** manually on the release PR branch before merging in that case.
+- Apple signing and notarization secrets remain optional, as described above; without them, release bundles are unsigned.
+
+After creating a release, the release workflow directly calls `.github/workflows/macos-release.yml` to build its exact tag and attach `Peer-macOS-arm64.app.zip`. This does not rely on tag/release events, which `GITHUB_TOKEN` cannot use to trigger another workflow. The ZIP preserves the app bundle's executable permissions and is also retained as an Actions artifact. To retry packaging/uploading an existing release, dispatch **Package macOS (Apple Silicon)** with its `release-tag`; leave that input blank for an artifact-only build of the selected branch.
+
 ## Review workflow
 
 Open a repository with the **+** button beside the repository name or ⌘/Ctrl O. Click the repository name to switch among the 12 most recently opened repositories; the dropdown shows their paths and marks the current one. Use arrow keys and Enter to choose, or Escape to close. The first opening shows Changes if any exist, otherwise Code. The app restores each repository's comparison, selected file, and scroll position, and keeps comment drafts while switching. Refresh with the toolbar or ⌘/Ctrl R after your agent edits files.
