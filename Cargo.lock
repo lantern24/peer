@@ -2563,7 +2563,7 @@ dependencies = [
 
 [[package]]
 name = "peer"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "peer-core",
  "serde",
@@ -2579,7 +2579,7 @@ dependencies = [
 
 [[package]]
 name = "peer-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "chrono",
  "fs2",

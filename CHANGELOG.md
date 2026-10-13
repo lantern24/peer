@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/lantern24/peer/compare/v0.1.0...v0.1.1) (2026-10-13)
+
+
+### Bug Fixes
+
+* **macos:** Seal and verify release app bundles ([#3](https://github.com/lantern24/peer/issues/3)) ([ee03a63](https://github.com/lantern24/peer/commit/ee03a631fb8287cc97b0548f63cf62981f9811b6))
+
 ## 0.1.0 (2026-10-13)
 
 
