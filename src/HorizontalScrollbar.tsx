@@ -23,6 +23,7 @@ export const HorizontalScrollbar = forwardRef<
   const refresh = useRef((_preservePosition?: boolean) => {});
   const sync = useRef(() => {});
   const restore = useRef((_target: { id: string; left: number } | null) => {});
+  const move = useRef((_left: number) => {});
   useImperativeHandle(
     ref,
     () => ({
@@ -45,11 +46,31 @@ export const HorizontalScrollbar = forwardRef<
     let mirroredLeft = 0;
     let preserveOnRender = false;
     let pendingRestore: { id: string; left: number } | null = null;
+    const mirroredColumns = new WeakMap<HTMLElement, number>();
+    const moveColumns = (left: number) => {
+      for (const column of columns) {
+        column.scrollLeft = left;
+        mirroredColumns.set(column, column.scrollLeft);
+      }
+    };
     const schedule = () => {
       frame ??= requestAnimationFrame(measure);
       // WKWebView can suspend animation frames while a window is occluded.
       // Programmatic navigation must still expose and restore its scrollbar.
       fallback ??= setTimeout(measure, 100);
+    };
+    const codeScroll = (event: Event) => {
+      const column = event.target;
+      if (
+        column instanceof HTMLElement &&
+        mirroredColumns.get(column) === column.scrollLeft
+      ) {
+        // These columns already received the same command, clamped to their
+        // own ranges. Do not let the renderer replay a shorter column's offset
+        // onto the wider one or arbitrate this command as a code-side gesture.
+        event.stopPropagation();
+      }
+      schedule();
     };
     const observer = new ResizeObserver(schedule);
     function measure(_timestamp?: number, preferSource = false) {
@@ -82,20 +103,20 @@ export const HorizontalScrollbar = forwardRef<
           : undefined;
       preserveOnRender = false;
       if (!sameHost || replacedColumns) {
-        host?.shadowRoot?.removeEventListener("scroll", schedule, true);
+        host?.shadowRoot?.removeEventListener("scroll", codeScroll, true);
         observer.disconnect();
         observer.observe(element);
         host = nextHost;
         hostIdentity = nextIdentity;
         columns = nextColumns;
-        host?.shadowRoot?.addEventListener("scroll", schedule, {
+        host?.shadowRoot?.addEventListener("scroll", codeScroll, {
           capture: true,
           passive: true,
         });
         if (host) observer.observe(host);
         columns.forEach((node) => observer.observe(node));
       }
-      // Drive the wider side so a shorter split column cannot truncate its range.
+      // Measure the wider side so a shorter column cannot truncate the range.
       source = columns.reduce<HTMLElement | undefined>(
         (widest, node) =>
           !widest ||
@@ -105,8 +126,8 @@ export const HorizontalScrollbar = forwardRef<
             : widest,
         undefined,
       );
-      if (source && (pendingLeft ?? retainedLeft) !== undefined)
-        source.scrollLeft = (pendingLeft ?? retainedLeft)!;
+      const nextLeft = pendingLeft ?? retainedLeft;
+      if (nextLeft !== undefined) moveColumns(nextLeft);
       const overflow = source ? source.scrollWidth - source.clientWidth : 0;
       // Source columns can still be placeholders when a refreshed viewport is
       // restored. Wait for the target's real overflow before consuming its offset.
@@ -117,7 +138,7 @@ export const HorizontalScrollbar = forwardRef<
         source.clientWidth > 0 &&
         (overflow > 0 || pendingRestore.left === 0)
       ) {
-        source.scrollLeft = pendingRestore.left;
+        moveColumns(pendingRestore.left);
         pendingRestore = null;
       }
       spacer.style.width = `${element.clientWidth + overflow}px`;
@@ -131,9 +152,17 @@ export const HorizontalScrollbar = forwardRef<
       // Ignore scroll events from our own mirror writes: they can arrive
       // after a newer gesture over the code and must not undo that gesture.
       if (source && Math.abs(element.scrollLeft - mirroredLeft) > 1) {
-        source.scrollLeft = element.scrollLeft;
+        moveColumns(element.scrollLeft);
         mirroredLeft = element.scrollLeft;
       }
+    };
+    move.current = (left) => {
+      measure();
+      element.scrollLeft = left;
+      // Home must also synchronize code when the bar is already at zero and
+      // therefore will not emit a scroll event of its own.
+      moveColumns(element.scrollLeft);
+      mirroredLeft = element.scrollLeft;
     };
     element.addEventListener("scroll", scroll, { passive: true });
     refresh.current = (preservePosition) => {
@@ -153,10 +182,11 @@ export const HorizontalScrollbar = forwardRef<
       refresh.current = () => {};
       sync.current = () => {};
       restore.current = () => {};
+      move.current = () => {};
       if (frame !== undefined) cancelAnimationFrame(frame);
       if (fallback !== undefined) clearTimeout(fallback);
       observer.disconnect();
-      host?.shadowRoot?.removeEventListener("scroll", schedule, true);
+      host?.shadowRoot?.removeEventListener("scroll", codeScroll, true);
       element.removeEventListener("scroll", scroll);
     };
   }, []);
@@ -181,7 +211,7 @@ export const HorizontalScrollbar = forwardRef<
         };
         if (event.key in positions) {
           event.preventDefault();
-          element.scrollLeft = positions[event.key];
+          move.current(positions[event.key]);
         }
       }}
     >

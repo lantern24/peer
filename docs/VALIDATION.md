@@ -2,6 +2,18 @@
 
 Reference machine: Apple M2, macOS 26.5.2 (25F84 / Darwin 25.5.0). The native app uses WKWebView with a configured 1440 × 940 window. The test-only configuration keeps its window above other windows to avoid occlusion-related rendering pauses; production windows retain normal behavior. Development tools: Rust 1.88 and Node.js 26.7.
 
+## Split-diff scrollbar command race — 2026-10-13 JST
+
+[Run 38385845221](https://github.com/lantern24/peer/actions/runs/38385845221/job/115257311625) failed the narrow-window scenario while waiting for Home to return every code column to zero. The uploaded artifacts show that unified mode completed and the failure occurred in split mode. The renderer's split-scroll manager retains a code-side scroll leader for 300 ms, while Peer's scrollbar previously wrote only the wider column; a previous leader could ignore or undo the command.
+
+A native WKWebView probe reproduced the race by delivering a code gesture and scrollbar Home in one task. Before the fix, the columns immediately read `[20, 0]` and subsequently returned to `[20, 20]`, despite Home. After the fix, both columns and the scrollbar stayed at zero; the resulting screenshot was inspected. The temporary probe was removed.
+
+Scrollbar commands and retained/restored positions now update every active column, clamping each to its own range. Capture-phase handling keeps those mirrored events out of the renderer's scroll-leader arbitration, so the shorter column cannot pull the wider column back from its end. Genuine code-side gestures still reach the renderer. Keyboard commands apply directly even when the scrollbar itself is already at the requested position and emits no scroll event.
+
+The existing native scenario now exercises Home and End immediately after gestures from each split column, in addition to unified/Code layouts, direct code scrolling, and collapse/expand. No timeout or assertion was relaxed. `npm test` passed all 26 frontend/harness tests, and `CARGO_TARGET_DIR=/tmp/peer-repository-lifecycle-target npm run build:test-app` passed TypeScript/Vite and native compilation. GitHub-hosted CI has not been rerun with this fix.
+
+The final `APP_BINARY=/tmp/peer-repository-lifecycle-target/debug/peer PEER_PERFORMANCE_MODE=report npm run test:desktop` run passed all 37 native scenarios across five spec files, with no skips. This includes the strengthened scrollbar regression, refresh/Back horizontal-position restoration, sidebar resizing, repository lifecycle, and commit history. The narrow split-view screenshot confirms that both columns expose their line endings. This is local WKWebView verification, not a new GitHub-hosted run.
+
 ## macOS release integrity — 2026-10-13 JST
 
 The published v0.1.0 ZIP installed through Homebrew, but `codesign --verify --deep --strict` and Gatekeeper assessment rejected the app with `code has no resources but signature indicates they must be present`. The credential-free release path had no bundle signing identity; earlier local validation explicitly supplied `APPLE_SIGNING_IDENTITY=-`.

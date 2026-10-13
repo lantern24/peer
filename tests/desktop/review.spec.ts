@@ -393,16 +393,41 @@ describe("Peer in the native webview", () => {
         );
         // The embedded driver sends raw WebDriver private-use characters for
         // Home/End. Dispatch standard DOM key events to exercise the real handler.
-        const press = (key: string) =>
-          browser.execute((key) => {
-            document.activeElement!.dispatchEvent(
-              new KeyboardEvent("keydown", {
-                key,
-                bubbles: true,
-                cancelable: true,
-              }),
-            );
-          }, key);
+        const press = (key: string, columnIndex: number | null = null) =>
+          browser.execute(
+            (key, columnIndex) => {
+              const bar = document.querySelector<HTMLElement>(
+                ".viewer-horizontal-scrollbar",
+              );
+              if (!bar) throw new Error("Missing horizontal scrollbar");
+              if (columnIndex !== null) {
+                const column = document
+                  .querySelector('[data-file-path="src/module-000.ts"]')
+                  ?.closest("diffs-container")
+                  ?.shadowRoot?.querySelectorAll<HTMLElement>("[data-code]")[
+                  columnIndex
+                ];
+                if (!column) throw new Error("Missing split column");
+                // Deliver the code gesture and scrollbar command in one task.
+                // The renderer must not replay its previous scroll leader over
+                // Home/End, even when the columns have different scroll ranges.
+                column.scrollLeft = 20;
+                column.dispatchEvent(new Event("scroll"));
+                bar.scrollLeft = 20;
+                bar.dispatchEvent(new Event("scroll"));
+              }
+              bar.dispatchEvent(
+                new KeyboardEvent("keydown", {
+                  key,
+                  bubbles: true,
+                  cancelable: true,
+                }),
+              );
+              if (columnIndex !== null) bar.dispatchEvent(new Event("scroll"));
+            },
+            key,
+            columnIndex,
+          );
         await press("Home");
         await browser.waitUntil(async () =>
           (await readColumns()).every((c) => c.left === 0),
@@ -448,6 +473,20 @@ describe("Peer in the native webview", () => {
         const after = await readColumns();
         expect(after.map((c) => c.text)).toEqual(before.map((c) => c.text));
         expect(after).toHaveLength(mode === "split" ? 2 : 1);
+        if (mode === "split") {
+          for (const columnIndex of [0, 1]) {
+            await press("Home", columnIndex);
+            await browser.waitUntil(async () =>
+              (await readColumns()).every((c) => c.left === 0),
+            );
+            await press("End", columnIndex);
+            await browser.waitUntil(async () =>
+              (await readColumns()).every(
+                (c) => c.left > 0 && c.end <= c.edge + 1,
+              ),
+            );
+          }
+        }
         await browser.saveScreenshot(
           resolve(`test-results/horizontal-${mode}.png`),
         );
