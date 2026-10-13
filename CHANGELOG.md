@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.2](https://github.com/lantern24/peer/compare/v0.1.1...v0.1.2) (2026-10-13)
+
+
+### Bug Fixes
+
+* **viewer:** Keep split columns synchronized during scrolling ([#6](https://github.com/lantern24/peer/issues/6)) ([99988a9](https://github.com/lantern24/peer/commit/99988a9cb325b18e655be60ed4bd05b2d1bed3e6))
+* **viewer:** Support legacy WebKit selection APIs ([#8](https://github.com/lantern24/peer/issues/8)) ([eba1fbc](https://github.com/lantern24/peer/commit/eba1fbc71c3bcbb4151aee29f44e184d1d65b192))
+
 ## [0.1.1](https://github.com/lantern24/peer/compare/v0.1.0...v0.1.1) (2026-10-13)
 
 
