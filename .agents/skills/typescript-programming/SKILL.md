@@ -39,6 +39,32 @@ Do not turn a focused fix into a style rewrite, dependency migration, or configu
   and the WebdriverIO runner execute in Node; `browser.execute` callbacks execute in the WebView
   and must receive serializable arguments rather than depend on runner-local closures.
 
+## Preserve WebKit compatibility
+
+- Peer uses the system WKWebView on macOS; a newer development machine or Chromium preview
+  does not establish support on older Macs. Read `vite.config.ts` (`safari16`) and
+  `src-tauri/tauri.conf.json` (minimum macOS `13.0`) before choosing web APIs. Keep that baseline;
+  do not raise it as a shortcut for a fix. See [Tauri's WebView versions](https://v2.tauri.app/reference/webview-versions/).
+- Prefer APIs available at the supported baseline. Use a newer DOM, JavaScript, CSS, or worker
+  feature only with verified support or a tested fallback that preserves the core workflow.
+  TypeScript DOM declarations and Vite's syntax target do not polyfill runtime APIs.
+- Detect capabilities at the call site instead of branching on user-agent or OS versions.
+  Method existence alone does not prove that its argument signature or behavior is compatible.
+  Keep compatibility adapters small, catch only the expected compatibility failure, and retain
+  an absent-API fallback; optional selection/history capture must not prevent opening a file.
+- Preserve `Viewer.sourceSelection` handling for modern
+  `getComposedRanges({ shadowRoots })`, older WebKit's `getComposedRanges(...shadowRoots)`,
+  and the absent-method `getRangeAt` fallback. Passing an options object to the legacy method
+  throws before navigation can load the next file, making the UI appear frozen.
+  The [WebKit report](https://bugs.webkit.org/show_bug.cgi?id=265632) documents the legacy signature.
+- Retain the selection compatibility regressions in `tests/desktop/navigation.spec.ts`.
+  For affected API paths, exercise current behavior and emulate legacy signatures or missing
+  capabilities in the native WebView; restore globals by reloading between cases. Assert file
+  selection, rendered content, Back, and navigation without a selection. Require restored text
+  selection when the API exposes shadow-DOM endpoints; otherwise keep file navigation usable.
+  Run on an affected/oldest supported runtime when available; describe emulation as emulation,
+  since success on the latest macOS CI runner does not prove the entire older WebKit baseline.
+
 ## Change IPC as one contract
 
 - Keep calls in `src/api.ts`; do not scatter raw `invoke` calls across new UI components.

@@ -568,6 +568,80 @@ describe("Version-aware navigation", () => {
       async () => !(await $('[aria-label="Go back"]').isEnabled()),
     );
   });
+  for (const selectionApi of ["legacy", "unavailable"] as const) {
+    it(`switches Code files and restores history with ${selectionApi} WebKit selection APIs`, async () => {
+      await switchView("Code");
+      await $('.tree-file[title="call.ts"]').click();
+      await sourceContains("asdf(); // B");
+      await browser.execute((selectionApi) => {
+        const original = Selection.prototype.getComposedRanges;
+        if (selectionApi === "unavailable") {
+          Object.defineProperty(Selection.prototype, "getComposedRanges", {
+            configurable: true,
+            value: undefined,
+          });
+        } else {
+          // Older WebKit accepts individual ShadowRoots, not an options object.
+          // Keep the actual native selection behavior behind that older signature.
+          Object.defineProperty(Selection.prototype, "getComposedRanges", {
+            configurable: true,
+            value: function (this: Selection, ...roots: unknown[]) {
+              const shadowRoots = roots.map((root) => {
+                if (!(root instanceof ShadowRoot))
+                  throw new TypeError("Expected a ShadowRoot");
+                return root;
+              });
+              try {
+                return original.call(this, { shadowRoots });
+              } catch (error) {
+                if (!(error instanceof TypeError)) throw error;
+                // Also run on a host whose native implementation is already legacy.
+                return Reflect.apply(original, this, shadowRoots);
+              }
+            },
+          });
+        }
+        const host = document.querySelector("diffs-container");
+        const line = host?.shadowRoot?.querySelector(
+          "[data-line][data-line-type]",
+        );
+        if (!line) throw new Error("Source line not rendered");
+        const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+        const text = walker.nextNode();
+        if (!text) throw new Error("Source text not rendered");
+        window.getSelection()?.setBaseAndExtent(text, 0, text, 4);
+      }, selectionApi);
+      // This used to reject while capturing history, before selecting or reading defs.ts.
+      await $('.tree-file[title="defs.ts"]').click();
+      await expect($('.tree-file[title="defs.ts"]')).toHaveAttribute(
+        "aria-current",
+        "true",
+      );
+      await sourceContains("version B");
+      await key("-", true);
+      await expect($('.tree-file[title="call.ts"]')).toHaveAttribute(
+        "aria-current",
+        "true",
+      );
+      await sourceContains("asdf(); // B");
+      // Without composed ranges, the native Range may hide shadow-DOM endpoints.
+      // File/history navigation must still work; legacy composed ranges retain selection.
+      if (selectionApi === "legacy") {
+        await browser.waitUntil(() =>
+          browser.execute(() => window.getSelection()?.toString() === "asdf"),
+        );
+      }
+      await browser.execute(() => window.getSelection()?.removeAllRanges());
+      await $('.tree-file[title="defs.ts"]').click();
+      await expect($('.tree-file[title="defs.ts"]')).toHaveAttribute(
+        "aria-current",
+        "true",
+      );
+      await sourceContains("version B");
+      // The next beforeEach reloads the WebView and restores Selection.prototype.
+    });
+  }
+
   it("records Code file and quick-open choices and restores collapsed state", async () => {
     // A shared-line preference must never select historical source in Code.
     await browser.execute(() => {

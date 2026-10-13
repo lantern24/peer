@@ -250,15 +250,22 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
           (
             root as ShadowRoot & { getSelection?: () => Selection | null }
           ).getSelection?.() ?? selection;
-        const composed = (
-          local as
-            | (Selection & {
-                getComposedRanges?: (options: {
-                  shadowRoots: ShadowRoot[];
-                }) => StaticRange[];
-              })
-            | null
-        )?.getComposedRanges?.({ shadowRoots: roots });
+        let composed: StaticRange[] | undefined;
+        if (local?.getComposedRanges) {
+          try {
+            composed = local.getComposedRanges({ shadowRoots: roots });
+          } catch (error) {
+            if (!(error instanceof TypeError)) throw error;
+            // Older WebKit accepts individual ShadowRoots and rejects the
+            // options object. Preserve its selection when capturing history.
+            const legacy = local as Selection & {
+              getComposedRanges: (
+                ...shadowRoots: ShadowRoot[]
+              ) => StaticRange[];
+            };
+            composed = legacy.getComposedRanges(...roots);
+          }
+        }
         const range =
           composed?.[0] ?? (local?.rangeCount ? local.getRangeAt(0) : null);
         if (!range) continue;

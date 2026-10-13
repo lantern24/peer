@@ -20,6 +20,11 @@ For mixed IPC changes, also use [TypeScript programming](../typescript-programmi
   `types.rs` for shared data. Resolve these module names under `crates/repo-core/src/`.
 - Target Rust 2021 and the workspace's Rust 1.88 minimum. Check `Cargo.toml` and the affected
   package manifest before using newer APIs or changing features; do not silently raise the MSRV.
+- For Tauri/WebView or macOS integration changes, preserve the minimum macOS version in
+  `src-tauri/tauri.conf.json` and follow the
+  [WebKit compatibility guidance](../typescript-programming/SKILL.md#preserve-webkit-compatibility).
+  A newer Rust SDK or successful native build does not upgrade the user's system WKWebView;
+  web API changes need supported signatures, fallbacks, and native behavioral regressions.
 - Prefer existing helpers and concrete functions over new frameworks, type-state layers, or
   dependencies. Do not turn a scoped fix into a repository-wide style or error-system migration.
 
