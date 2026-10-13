@@ -2,6 +2,18 @@
 
 Reference machine: Apple M2, macOS 26.5.2 (25F84 / Darwin 25.5.0). The native app uses WKWebView with a configured 1440 × 940 window. The test-only configuration keeps its window above other windows to avoid occlusion-related rendering pauses; production windows retain normal behavior. Development tools: Rust 1.88 and Node.js 26.7.
 
+## macOS release integrity — 2026-10-13 JST
+
+The published v0.1.0 ZIP installed through Homebrew, but `codesign --verify --deep --strict` and Gatekeeper assessment rejected the app with `code has no resources but signature indicates they must be present`. The credential-free release path had no bundle signing identity; earlier local validation explicitly supplied `APPLE_SIGNING_IDENTITY=-`.
+
+`bundle.macOS.signingIdentity` now defaults to `-`, so Tauri ad-hoc signs the executable and complete app bundle without Apple credentials. An explicit `APPLE_SIGNING_IDENTITY` still overrides the default. The packaging workflow verifies the built app and an app extracted from the final ZIP before either artifact or release upload.
+
+Built with all Apple signing/notarization environment variables unset using `CI=true npm run bundle` and a fresh `CARGO_TARGET_DIR`. The existing build cache first failed on permission-file paths under the repository's old `diffg` directory; the clean build passed. The arm64 app reported `Signature=adhoc` and a sealed resource envelope. Strict signature verification passed before archiving and after running the workflow's actual archive/extract/verify commands. A separate extracted copy with a modified `Info.plist` was rejected, confirming that the verification detects bundle tampering.
+
+The extracted production app launched with an isolated `PEER_DATA_DIR` and created its 1440 × 940 main window. Window screenshot capture was unavailable, so this is launch/window evidence, not a visual UI review. `actionlint` 1.7.12 passed for the changed release workflow. Temporary smoke scripts and build files were removed; the verified ZIP is retained locally at `target/Peer-macOS-arm64.app.zip`.
+
+Gatekeeper assessment still rejects the ad-hoc app: integrity verification is not Developer ID trust or notarization. No Developer ID signing path or GitHub-hosted packaging run was exercised. The existing v0.1.0 release asset and Homebrew checksum were not replaced; distributing this fix requires a new release and corresponding cask update.
+
 ## Language-server content-modified race — 2026-10-13 JST
 
 [Run 38337629136](https://github.com/lantern24/peer/actions/runs/38337629136/job/115101206995) failed the real Go/TypeScript/JavaScript/Rust navigation scenario at the reference lookup with `serverError: content modified`, after its initial definition/indexing wait had succeeded. The stdio client discarded numeric LSP error codes and treated this response as a terminal server error.
@@ -227,5 +239,5 @@ Windows/Linux core-test jobs are configured in CI but were not executed from thi
 To reproduce the local package without interactive Finder customization:
 
 ```sh
-CI=true APPLE_SIGNING_IDENTITY=- npm run bundle
+CI=true npm run bundle
 ```

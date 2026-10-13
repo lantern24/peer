@@ -22,7 +22,7 @@ npm run bundle
 npm run bundle:dmg
 ```
 
-The app is written to `target/aarch64-apple-darwin/release/bundle/macos/Peer.app`. The optional disk image is written to `target/aarch64-apple-darwin/release/bundle/dmg`. The executable is named `peer`. Development builds need no signing credentials. For distribution, configure Tauri's `APPLE_SIGNING_IDENTITY`, certificate/password, and Apple notarization credentials. `.github/workflows/macos-release.yml` packages the Apple Silicon app and reads these from GitHub Actions secrets; unsigned builds are possible without them.
+The app is written to `target/aarch64-apple-darwin/release/bundle/macos/Peer.app`. The optional disk image is written to `target/aarch64-apple-darwin/release/bundle/dmg`. The executable is named `peer`. Both bundle commands default to ad-hoc signing (`bundle.macOS.signingIdentity: "-"`), which seals the complete app without Apple credentials. This provides signature integrity, not an Apple-verified publisher or notarization; macOS may still require explicit approval to open the app. For Developer ID signing and notarization, configure Tauri's `APPLE_SIGNING_IDENTITY`, certificate/password, and Apple notarization credentials. The environment signing identity overrides the ad-hoc default. `.github/workflows/macos-release.yml` reads these values from GitHub Actions secrets.
 
 The shared logo source is `assets/icon.svg`. After editing it, run `npm run icons` to regenerate the desktop icons; the header and welcome screen use the SVG directly.
 
@@ -38,9 +38,9 @@ Repository setup:
 
 - When using the built-in `GITHUB_TOKEN`, enable **Settings → Actions → General → Workflow permissions → Allow GitHub Actions to create and approve pull requests**. The workflow requests the write permissions it needs.
 - For automatic CI on release PRs, add a `RELEASE_PLEASE_TOKEN` Actions secret containing a token with repository **Contents**, **Issues**, and **Pull requests** read/write permissions. Without it, the workflow uses `GITHUB_TOKEN`, whose generated PRs do not trigger other workflows. Run **Verify Peer** manually on the release PR branch before merging in that case.
-- Apple signing and notarization secrets remain optional, as described above; without them, release bundles are unsigned.
+- Apple signing and notarization secrets remain optional, as described above; without them, release bundles are ad-hoc signed but not notarized.
 
-After creating a release, the release workflow directly calls `.github/workflows/macos-release.yml` to build its exact tag and attach `Peer-macOS-arm64.app.zip`. This does not rely on tag/release events, which `GITHUB_TOKEN` cannot use to trigger another workflow. The ZIP preserves the app bundle's executable permissions and is also retained as an Actions artifact. To retry packaging/uploading an existing release, dispatch **Package macOS (Apple Silicon)** with its `release-tag`; leave that input blank for an artifact-only build of the selected branch.
+After creating a release, the release workflow directly calls `.github/workflows/macos-release.yml` to build its exact tag and attach `Peer-macOS-arm64.app.zip`. This does not rely on tag/release events, which `GITHUB_TOKEN` cannot use to trigger another workflow. Before uploading, the workflow runs `codesign --verify --deep --strict` on both the built app and a fresh extraction of the ZIP; signature failures stop publication. The ZIP preserves the app bundle's executable permissions and is also retained as an Actions artifact. To retry packaging/uploading an existing release, dispatch **Package macOS (Apple Silicon)** with its `release-tag`; leave that input blank for an artifact-only build of the selected branch.
 
 ## Review workflow
 

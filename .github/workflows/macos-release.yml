@@ -35,6 +35,7 @@ jobs:
           fi
           npm run bundle
           test "$(lipo -archs target/aarch64-apple-darwin/release/bundle/macos/Peer.app/Contents/MacOS/peer)" = arm64
+          codesign --verify --deep --strict --verbose=2 target/aarch64-apple-darwin/release/bundle/macos/Peer.app
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -42,8 +43,13 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-      - name: Archive app bundle
-        run: ditto -c -k --sequesterRsrc --keepParent target/aarch64-apple-darwin/release/bundle/macos/Peer.app Peer-macOS-arm64.app.zip
+      - name: Archive and verify app bundle
+        run: |
+          ditto -c -k --sequesterRsrc --keepParent target/aarch64-apple-darwin/release/bundle/macos/Peer.app Peer-macOS-arm64.app.zip
+          verification_dir="$(mktemp -d)"
+          trap 'rm -rf "$verification_dir"' EXIT
+          ditto -x -k Peer-macOS-arm64.app.zip "$verification_dir"
+          codesign --verify --deep --strict --verbose=2 "$verification_dir/Peer.app"
       - uses: actions/upload-artifact@v4
         with:
           name: Peer-macOS-arm64
