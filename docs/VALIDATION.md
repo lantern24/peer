@@ -2,6 +2,14 @@
 
 Reference machine: Apple M2, macOS 26.5.2 (25F84 / Darwin 25.5.0). The native app uses WKWebView with a configured 1440 × 940 window. The test-only configuration keeps its window above other windows to avoid occlusion-related rendering pauses; production windows retain normal behavior. Development tools: Rust 1.88 and Node.js 26.7.
 
+## Language-server review fixes — 2026-10-14 JST
+
+PATH discovery now consumes the NUL-framed response incrementally, without requiring stdout EOF from background shell-startup jobs. The five-second deadline, 64 KiB read limit, successful shell exit check, and explicit `env.PATH` precedence remain in place. The existing all-preset regression now starts a background reader blocked on a FIFO, retaining stdout until test cleanup, and still requires every definition/reference and override check to pass.
+
+The generated Node launchers use dynamic `import()`. Their fixture directory explicitly selects CommonJS, so current Node versions cannot hide the Node 22.0–22.6 compatibility regression through automatic module detection.
+
+`cargo test -p peer-core --locked` passed all 45 regular tests, with the two opt-in real-server suites ignored. `cargo fmt --all -- --check` passed. A separate core-API smoke launched real rust-analyzer under Finder-style PATH and resolved a cross-file definition while the startup background reader was still alive. A standalone launcher smoke on Node 26.7.0, with CommonJS selected and syntax detection disabled, completed LSP initialization and definition lookup. This emulates the older Node parsing behavior; no Node 22.0–22.6 binary or fresh native GUI scenario was run for these review fixes.
+
 ## Rust analysis readiness — 2026-10-14 JST
 
 A direct rust-analyzer protocol trace confirmed the intermittent empty-result race: the server returned `[]` for a cross-file function while reporting `quiescent: false`; the identical request returned its definition after `quiescent: true`. Peer previously ignored those notifications. Its opt-in Rust smoke test also retried empty responses during startup, hiding the first-request failure.

@@ -131,25 +131,36 @@ async fn read_login_shell_path() -> std::io::Result<std::ffi::OsString> {
             .stdout
             .take()
             .ok_or_else(|| io::Error::other("Missing shell stdout"))?;
-        let mut bytes = Vec::new();
-        stdout.take(LIMIT + 1).read_to_end(&mut bytes).await?;
-        if bytes.len() as u64 > LIMIT {
-            return Err(io::Error::other("Shell startup output exceeded 64 KiB"));
-        }
+        let mut output = BufReader::new(stdout.take(LIMIT + 1));
+        let mut field = Vec::new();
+        let mut consumed = 0;
+        let mut marker_seen = false;
+        // A startup background job may retain stdout after the shell exits.
+        // Read through the complete NUL frame, not through pipe EOF.
+        let path = loop {
+            field.clear();
+            consumed += output.read_until(0, &mut field).await? as u64;
+            if consumed > LIMIT {
+                return Err(io::Error::other("Shell startup output exceeded 64 KiB"));
+            }
+            if field.pop() != Some(0) {
+                return Err(io::Error::other("Login shell did not return PATH"));
+            }
+            if marker_seen {
+                if field.is_empty() {
+                    return Err(io::Error::other("Login shell did not return PATH"));
+                }
+                break OsString::from_vec(field);
+            }
+            marker_seen = field == b"PEER_PATH";
+        };
         let status = child.wait().await?;
         if !status.success() {
             return Err(io::Error::other(format!(
                 "Login shell exited with {status}"
             )));
         }
-        // NUL framing excludes startup banners without trimming valid path bytes.
-        let mut fields = bytes.split(|byte| *byte == 0);
-        let path = fields
-            .find(|field| *field == b"PEER_PATH")
-            .and_then(|_| fields.next())
-            .filter(|path| !path.is_empty())
-            .ok_or_else(|| io::Error::other("Login shell did not return PATH"))?;
-        Ok(OsString::from_vec(path.to_vec()))
+        Ok(path)
     })
     .await
     .unwrap_or_else(|_| {

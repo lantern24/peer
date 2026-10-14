@@ -556,6 +556,17 @@ async fn login_shell_path_launches_servers_and_their_toolchains_from_finder() {
             let home = temporary.path();
             fs::create_dir(home.join("server bin")).unwrap();
             fs::create_dir(home.join("runtime bin")).unwrap();
+            // Match Node 22.0–22.6 even when the host detects module syntax.
+            fs::write(
+                home.join("server bin/package.json"),
+                r#"{"type":"commonjs"}"#,
+            )
+            .unwrap();
+            assert!(Command::new("/usr/bin/mkfifo")
+                .arg(home.join("startup-input"))
+                .status()
+                .unwrap()
+                .success());
             symlink(
                 node.trim(),
                 home.join("runtime bin/peer-navigation-shell-runtime"),
@@ -568,7 +579,7 @@ async fn login_shell_path_launches_servers_and_their_toolchains_from_finder() {
                 // Native servers/shims must also pass PATH to their toolchains.
                 let body = if matches!(server.id.as_str(), "typescript" | "python") {
                     format!(
-                        "#!/usr/bin/env node\nimport {};\n",
+                        "#!/usr/bin/env node\nimport({});\n",
                         serde_json::to_string(url::Url::from_file_path(&script).unwrap().as_str())
                             .unwrap()
                     )
@@ -581,6 +592,8 @@ async fn login_shell_path_launches_servers_and_their_toolchains_from_finder() {
             }
             // Both login and interactive startup files contribute to the PATH.
             // Startup banners and spaces in directories must not corrupt it.
+            // The background reader retains stdout until the parent kills it;
+            // PATH discovery must finish without waiting for that pipe's EOF.
             fs::write(
                 home.join(".zprofile"),
                 "printf 'login banner\\n'\nexport PATH=\"$HOME/server bin:$PATH\"\n",
@@ -588,7 +601,7 @@ async fn login_shell_path_launches_servers_and_their_toolchains_from_finder() {
             .unwrap();
             fs::write(
                 home.join(".zshrc"),
-                "printf 'interactive banner\\n'\nexport PATH=\"$HOME/runtime bin:$PATH\"\n",
+                "printf 'interactive banner\\n'\nexport PATH=\"$HOME/runtime bin:$PATH\"\n/bin/cat \"$HOME/startup-input\" &\nprintf '%s' \"$!\" > \"$HOME/startup.pid\"\n",
             )
             .unwrap();
             let output = Command::new(std::env::current_exe().unwrap())
@@ -607,6 +620,13 @@ async fn login_shell_path_launches_servers_and_their_toolchains_from_finder() {
                 .env(CHILD_HOME, home)
                 .output()
                 .unwrap();
+            // Clean up even when the isolated navigation assertions failed.
+            let startup_pid = fs::read_to_string(home.join("startup.pid")).unwrap();
+            assert!(Command::new("/bin/kill")
+                .arg(startup_pid)
+                .status()
+                .unwrap()
+                .success());
             assert!(
                 output.status.success(),
                 "isolated navigation test failed:\n{}\n{}",
