@@ -604,35 +604,60 @@ async fn login_shell_path_launches_servers_and_their_toolchains_from_finder() {
                 "printf 'interactive banner\\n'\nexport PATH=\"$HOME/runtime bin:$PATH\"\n/bin/cat \"$HOME/startup-input\" &\nprintf '%s' \"$!\" > \"$HOME/startup.pid\"\n",
             )
             .unwrap();
-            let output = Command::new(std::env::current_exe().unwrap())
-                .args([
-                    "--exact",
-                    "login_shell_path_launches_servers_and_their_toolchains_from_finder",
-                    "--nocapture",
-                ])
-                .env_clear()
-                .env("PATH", FINDER_PATH)
-                .env("HOME", home)
-                .env("ZDOTDIR", home)
-                .env("SHELL", "/bin/zsh")
-                .env("GIT_CONFIG_NOSYSTEM", "1")
-                .env("GIT_CONFIG_GLOBAL", "/dev/null")
-                .env(CHILD_HOME, home)
-                .output()
-                .unwrap();
-            // Clean up even when the isolated navigation assertions failed.
-            let startup_pid = fs::read_to_string(home.join("startup.pid")).unwrap();
-            assert!(Command::new("/bin/kill")
-                .arg(startup_pid)
-                .status()
-                .unwrap()
-                .success());
-            assert!(
-                output.status.success(),
-                "isolated navigation test failed:\n{}\n{}",
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr)
-            );
+            fs::write(
+                home.join(".bash_profile"),
+                "printf 'login banner\\n'\nexport PATH=\"$HOME/server bin:$PATH\"\n. \"$HOME/.bashrc\"\n",
+            )
+            .unwrap();
+            fs::write(
+                home.join(".bashrc"),
+                "printf 'interactive banner\\n'\nexport PATH=\"$HOME/runtime bin:$PATH\"\n",
+            )
+            .unwrap();
+            fs::write(
+                home.join(".login"),
+                "echo login banner\nsetenv PATH \"$HOME/server bin:$PATH\"\n",
+            )
+            .unwrap();
+            fs::write(
+                home.join(".cshrc"),
+                "echo interactive banner\nif ($?prompt) setenv PATH \"$HOME/runtime bin:$PATH\"\n",
+            )
+            .unwrap();
+            for shell in ["/bin/zsh", "/bin/bash", "/bin/tcsh", "/bin/csh"] {
+                let output = Command::new(std::env::current_exe().unwrap())
+                    .args([
+                        "--exact",
+                        "login_shell_path_launches_servers_and_their_toolchains_from_finder",
+                        "--nocapture",
+                    ])
+                    .env_clear()
+                    .env("PATH", FINDER_PATH)
+                    .env("HOME", home)
+                    .env("ZDOTDIR", home)
+                    .env("SHELL", shell)
+                    .env("GIT_CONFIG_NOSYSTEM", "1")
+                    .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                    .env(CHILD_HOME, home)
+                    .output()
+                    .unwrap();
+                if shell == "/bin/zsh" {
+                    // Clean up even when the isolated navigation assertions failed.
+                    let startup_pid = fs::read_to_string(home.join("startup.pid")).unwrap();
+                    assert!(Command::new("/bin/kill")
+                        .arg(startup_pid)
+                        .status()
+                        .unwrap()
+                        .success());
+                }
+                assert!(
+                    output.status.success(),
+                    "{shell}: isolated navigation test failed:\n{}\n{}",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                println!("{shell}: all presets and custom server passed");
+            }
             return;
         }
     };

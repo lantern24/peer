@@ -117,16 +117,29 @@ async fn read_login_shell_path() -> std::io::Result<std::ffi::OsString> {
     let shell = std::env::var_os("SHELL")
         .filter(|shell| !shell.is_empty())
         .unwrap_or_else(|| "/bin/zsh".into());
-    let mut child = Command::new(shell)
-        .args(["-ilc", "printf '\\0PEER_PATH\\0%s\\0' \"$PATH\""])
+    // A leading '-' selects login mode without tcsh's standalone-only -l flag.
+    let mut login_name = OsString::from("-");
+    login_name.push(Path::new(&shell).file_name().unwrap_or(shell.as_os_str()));
+    let mut child = Command::new(&shell)
+        .arg0(login_name)
+        .arg("-i")
         // Do not run shell startup files in the repository being inspected.
         .current_dir(std::env::var_os("HOME").unwrap_or_else(|| "/".into()))
-        .stdin(Stdio::null())
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .kill_on_drop(true)
         .spawn()?;
     let result = tokio::time::timeout(Duration::from_secs(5), async {
+        // tcsh's -c disables interactive startup state even with -i.
+        let mut stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| io::Error::other("Missing shell stdin"))?;
+        stdin
+            .write_all(b"printf '\\0PEER_PATH\\0%s\\0' \"$PATH\"\nexit\n")
+            .await?;
+        drop(stdin);
         let stdout = child
             .stdout
             .take()

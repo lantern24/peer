@@ -2,6 +2,14 @@
 
 Reference machine: Apple M2, macOS 26.5.2 (25F84 / Darwin 25.5.0). The native app uses WKWebView with a configured 1440 × 940 window. The test-only configuration keeps its window above other windows to avoid occlusion-related rendering pauses; production windows retain normal behavior. Development tools: Rust 1.88 and Node.js 26.7.
 
+## tcsh/csh login-shell compatibility — 2026-10-14 JST
+
+PR #10's review identified that tcsh/csh cannot combine `-l` with the other shell flags. PATH discovery now selects login mode through a leading `-` in the executable's `argv[0]`, uses `-i`, and sends the framed PATH command through stdin. Avoiding `-c` also preserves tcsh's interactive startup state: the expanded regression caught that `-ic` leaves `prompt` unset and skips prompt-guarded PATH setup.
+
+The isolated all-preset navigation regression now runs separately under `/bin/zsh`, `/bin/bash`, `/bin/tcsh`, and `/bin/csh`. Server and child-runtime directories are supplied by separate login and interactive startup files; the csh fixture guards its runtime PATH with `$?prompt`. All four shell runs passed every definition/reference and PATH-override check. `cargo test -p peer-core --locked -- --nocapture` passed all 45 regular tests, with two opt-in suites ignored; Rust formatting passed.
+
+A standalone core-API smoke also launched real rust-analyzer under Finder-style PATH with tcsh and csh, using separate server and runtime directories from `.login` and the prompt-guarded `.cshrc`. Both resolved the first cross-file definition. Temporary smoke sources were removed. No fresh native GUI or hosted-CI run is claimed for this fix.
+
 ## Language-server review fixes — 2026-10-14 JST
 
 PATH discovery now consumes the NUL-framed response incrementally, without requiring stdout EOF from background shell-startup jobs. The five-second deadline, 64 KiB read limit, successful shell exit check, and explicit `env.PATH` precedence remain in place. The existing all-preset regression now starts a background reader blocked on a FIFO, retaining stdout until test cleanup, and still requires every definition/reference and override check to pass.
