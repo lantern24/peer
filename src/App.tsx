@@ -995,11 +995,20 @@ export default function App() {
               <button
                 className="icon-button"
                 aria-label="Go back"
-                title="Go back (Ctrl+-)"
+                title={`Go back (${navigation.backShortcut}; Ctrl+-)`}
                 disabled={!navigation.historyLength}
                 onClick={() => void navigation.back()}
               >
                 <ArrowLeft size={16} />
+              </button>
+              <button
+                className="icon-button"
+                aria-label="Go forward"
+                title={`Go forward (${navigation.forwardShortcut})`}
+                disabled={!navigation.forwardLength}
+                onClick={() => void navigation.forward()}
+              >
+                <ArrowRight size={16} />
               </button>
               <div className="view-switch">
                 <button

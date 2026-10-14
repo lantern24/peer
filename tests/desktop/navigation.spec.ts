@@ -38,6 +38,34 @@ async function key(key: string, ctrlKey = false, shiftKey = false) {
     shiftKey,
   );
 }
+async function historyKey(
+  direction: "back" | "forward",
+  options: KeyboardEventInit = {},
+  selector?: string,
+) {
+  return browser.execute(
+    (direction, options, selector) => {
+      const mac = /Mac|iPhone|iPad/.test(navigator.platform);
+      const back = direction === "back";
+      const event = new KeyboardEvent("keydown", {
+        key: mac ? (back ? "[" : "]") : back ? "ArrowLeft" : "ArrowRight",
+        metaKey: mac,
+        altKey: !mac,
+        bubbles: true,
+        composed: true,
+        cancelable: true,
+        ...options,
+      });
+      const target = selector ? document.querySelector(selector) : window;
+      if (!target) throw new Error(`Missing keyboard target: ${selector}`);
+      target.dispatchEvent(event);
+      return event.defaultPrevented;
+    },
+    direction,
+    options,
+    selector,
+  );
+}
 async function symbol(
   name: string,
   side: "old" | "new" = "new",
@@ -327,6 +355,10 @@ describe("Version-aware navigation", () => {
     await sourceContains("asdf(); // A");
     await key("-", true);
     await sourceContains("version A");
+    await historyKey("forward");
+    await sourceContains("asdf(); // A");
+    await historyKey("back");
+    await sourceContains("version A");
     await $('[aria-label="References"]').waitForExist();
     await key("-", true);
     await $('[aria-label="Comparison mode"]').waitForExist();
@@ -566,6 +598,129 @@ describe("Version-aware navigation", () => {
     await $('[aria-label="Refresh repository"]').waitForEnabled();
     await browser.waitUntil(
       async () => !(await $('[aria-label="Go back"]').isEnabled()),
+    );
+  });
+
+  for (const platform of ["MacIntel", "Win32", "Linux x86_64"]) {
+    it(`traverses and branches file history with browser shortcuts on ${platform}`, async () => {
+      // Emulate shortcut selection only; the native WebView still runs on the host OS.
+      // beforeEach reloads the document to restore navigator.platform.
+      await browser.execute((platform) => {
+        Object.defineProperty(navigator, "platform", {
+          configurable: true,
+          value: platform,
+        });
+      }, platform);
+      await switchView("Code");
+      const selectedFile = async (path: string, text: string) => {
+        await expect($(`.tree-file[title="${path}"]`)).toHaveAttribute(
+          "aria-current",
+          "true",
+        );
+        await sourceContains(text);
+      };
+      await $('.tree-file[title="call.ts"]').click();
+      await selectedFile("call.ts", "asdf(); // B");
+      await $('[aria-label="Refresh repository"]').click();
+      await $('[aria-label="Refresh repository"]').waitForEnabled();
+      await expect($('[aria-label="Go back"]')).not.toBeEnabled();
+      await expect($('[aria-label="Go forward"]')).not.toBeEnabled();
+      expect(await historyKey("back")).toBe(true);
+      expect(await historyKey("forward")).toBe(true);
+      await selectedFile("call.ts", "asdf(); // B");
+
+      await $('.tree-file[title="defs.ts"]').click();
+      await selectedFile("defs.ts", "version B");
+      await $('.tree-file[title="keep.ts"]').click();
+      await selectedFile("keep.ts", "export function keep");
+      expect(await historyKey("back")).toBe(true);
+      await selectedFile("defs.ts", "version B");
+      expect(await historyKey("back")).toBe(true);
+      await selectedFile("call.ts", "asdf(); // B");
+      await expect($('[aria-label="Go back"]')).not.toBeEnabled();
+      expect(await historyKey("forward")).toBe(true);
+      await selectedFile("defs.ts", "version B");
+
+      // Both directions are available, but typing, dialogs and unrelated chords win.
+      await $('button[aria-label="Find in file"]').click();
+      for (const direction of ["back", "forward"] as const) {
+        expect(
+          await historyKey(direction, {}, 'input[aria-label="Find in file"]'),
+        ).toBe(false);
+        for (const options of [
+          { shiftKey: true },
+          { ctrlKey: true },
+          { repeat: true },
+          { isComposing: true },
+          platform === "MacIntel" ? { altKey: true } : { metaKey: true },
+        ]) {
+          expect(await historyKey(direction, options)).toBe(false);
+        }
+      }
+      await selectedFile("defs.ts", "version B");
+      await $('[aria-label="Close search"]').click();
+      await key("p", true);
+      await $('[aria-label="Quick open file"]').waitForDisplayed();
+      expect(await historyKey("back")).toBe(false);
+      expect(await historyKey("forward")).toBe(false);
+      await browser.keys("Escape");
+      await $('[aria-label="Quick open file"]').waitForExist({ reverse: true });
+      await selectedFile("defs.ts", "version B");
+
+      expect(await historyKey("forward")).toBe(true);
+      await selectedFile("keep.ts", "export function keep");
+      await expect($('[aria-label="Go forward"]')).not.toBeEnabled();
+      expect(await historyKey("forward")).toBe(true);
+      await selectedFile("keep.ts", "export function keep");
+      await historyKey("back");
+      await selectedFile("defs.ts", "version B");
+      await $('.tree-file[title="call.ts"]').click();
+      await selectedFile("call.ts", "asdf(); // B");
+      await expect($('[aria-label="Go forward"]')).not.toBeEnabled();
+      await historyKey("forward");
+      await selectedFile("call.ts", "asdf(); // B");
+
+      await $('[aria-label="Go back"]').click();
+      await selectedFile("defs.ts", "version B");
+      await $('[aria-label="Go forward"]').click();
+      await selectedFile("call.ts", "asdf(); // B");
+      await historyKey("back");
+      await selectedFile("defs.ts", "version B");
+      await expect($('[aria-label="Go forward"]')).toBeEnabled();
+      await $('[aria-label="Refresh repository"]').click();
+      await $('[aria-label="Refresh repository"]').waitForEnabled();
+      await expect($('[aria-label="Go back"]')).not.toBeEnabled();
+      await expect($('[aria-label="Go forward"]')).not.toBeEnabled();
+      await historyKey("forward");
+      await selectedFile("defs.ts", "version B");
+    });
+  }
+
+  it("uses native history keys and restores the forward viewport", async () => {
+    await switchView("Code");
+    await $('.tree-file[title="call.ts"]').click();
+    await sourceContains("asdf(); // B");
+    await $('.tree-file[title="defs.ts"]').click();
+    await sourceContains("version B");
+    await clickInPlace('[aria-label="Collapse defs.ts"]');
+    await expect($('[aria-label="Expand defs.ts"]')).toExist();
+    const mac = process.platform === "darwin";
+    await browser.keys(mac ? ["Meta", "["] : ["Alt", "ArrowLeft"]);
+    await expect($('.tree-file[title="call.ts"]')).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+    await sourceContains("asdf(); // B");
+    await browser.keys(mac ? ["Meta", "]"] : ["Alt", "ArrowRight"]);
+    await expect($('.tree-file[title="defs.ts"]')).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+    await expect($('[aria-label="Expand defs.ts"]')).toExist();
+    await clickInPlace('[aria-label="Expand defs.ts"]');
+    await sourceContains("version B");
+    await browser.saveScreenshot(
+      resolve("test-results/navigation-keyboard-forward.png"),
     );
   });
   for (const selectionApi of ["legacy", "unavailable"] as const) {
