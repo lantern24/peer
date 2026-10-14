@@ -19,6 +19,11 @@ use tokio::{
 };
 
 type Reply = Result<Value, NavigationError>;
+#[derive(Clone, Copy, Default)]
+struct AnalysisStatus {
+    quiescent: Option<bool>,
+    revision: u64,
+}
 struct Inner {
     sender: mpsc::UnboundedSender<Value>,
     pending: Mutex<HashMap<u64, oneshot::Sender<Reply>>>,
@@ -26,6 +31,7 @@ struct Inner {
     sequence: AtomicU64,
     failed: AtomicBool,
     stderr: Mutex<String>,
+    analysis: tokio::sync::watch::Sender<AnalysisStatus>,
 }
 impl Drop for Inner {
     fn drop(&mut self) {
@@ -35,6 +41,7 @@ impl Drop for Inner {
 #[derive(Clone)]
 pub(crate) struct Client {
     inner: Arc<Inner>,
+    require_analysis_status: bool,
     pub capabilities: Value,
 }
 struct Pending {
@@ -188,6 +195,7 @@ impl Client {
             sequence: AtomicU64::new(1),
             failed: AtomicBool::new(false),
             stderr: Mutex::new(String::new()),
+            analysis: tokio::sync::watch::channel(AnalysisStatus::default()).0,
         });
         tokio::spawn(async move {
             while let Some(message) = messages.recv().await {
@@ -305,6 +313,15 @@ impl Client {
                             }
                         };
                         let _ = inner.sender.send(reply);
+                    } else if method == "experimental/serverStatus" {
+                        if let Some(quiescent) = message["params"]["quiescent"].as_bool() {
+                            inner.analysis.send_modify(|status| {
+                                if status.quiescent != Some(quiescent) {
+                                    status.quiescent = Some(quiescent);
+                                    status.revision += 1;
+                                }
+                            });
+                        }
                     }
                 } else if let Some(id) = message["id"].as_u64() {
                     if let Some(sender) = inner.pending.lock().remove(&id) {
@@ -316,6 +333,7 @@ impl Client {
             };
             if let Some(inner) = weak.upgrade() {
                 inner.failed.store(true, Ordering::SeqCst);
+                inner.analysis.send_modify(|_| {});
                 let _ = inner.child.lock().await.start_kill();
                 let detail = inner.stderr.lock().clone();
                 for (_, sender) in inner.pending.lock().drain() {
@@ -328,6 +346,7 @@ impl Client {
         });
         let mut client = Self {
             inner,
+            require_analysis_status: false,
             capabilities: Value::Null,
         };
         let result = client.request("initialize", json!({
@@ -337,9 +356,14 @@ impl Client {
             "capabilities":{"general":{"positionEncodings":["utf-16"]},
                 "workspace":{"configuration":true,"workspaceFolders":true,"applyEdit":false},
                 "window":{"workDoneProgress":true},
+                "experimental":{"serverStatusNotification":true},
                 "textDocument":{"definition":{"linkSupport":true},"references":{},"synchronization":{"didSave":false}}}
         }), Duration::from_secs(60)).await?;
         client.capabilities = result["capabilities"].clone();
+        // rust-analyzer can answer with an empty result before its first status
+        // notification. Detect the server, not a preset ID or executable path.
+        client.require_analysis_status =
+            result["serverInfo"]["name"].as_str() == Some("rust-analyzer");
         if client.capabilities["positionEncoding"]
             .as_str()
             .is_some_and(|encoding| encoding != "utf-16")
@@ -363,13 +387,28 @@ impl Client {
             .map_err(|_| NavigationError::new("serverError", "Language server disconnected"))
     }
     pub async fn request(&self, method: &str, params: Value, timeout: Duration) -> Reply {
-        let retry_content_modified = matches!(
+        let navigation_request = matches!(
             method,
             "textDocument/definition" | "textDocument/references"
         );
         let mut message = json!({"jsonrpc":"2.0","method":method,"params":params});
+        let mut analysis = navigation_request.then(|| self.inner.analysis.subscribe());
         tokio::time::timeout(timeout, async {
             loop {
+                let revision = if let Some(analysis) = &mut analysis {
+                    analysis
+                        .wait_for(|status| {
+                            self.inner.failed.load(Ordering::SeqCst)
+                                || status.quiescent.unwrap_or(!self.require_analysis_status)
+                        })
+                        .await
+                        .map_err(|_| {
+                            NavigationError::new("serverError", "Language server disconnected")
+                        })?
+                        .revision
+                } else {
+                    0
+                };
                 if !self.alive() {
                     return Err(NavigationError::new(
                         "serverError",
@@ -386,7 +425,7 @@ impl Client {
                 message["id"] = json!(id);
                 self.inner
                     .sender
-                    .send(if retry_content_modified {
+                    .send(if navigation_request {
                         message.clone()
                     } else {
                         message.take()
@@ -401,7 +440,7 @@ impl Client {
                     // Opening a document or background indexing can invalidate
                     // analysis even though Peer's snapshot source is unchanged.
                     // Retry only LSP ContentModified, within the original deadline.
-                    if retry_content_modified && error["code"].as_i64() == Some(-32801) {
+                    if navigation_request && error["code"].as_i64() == Some(-32801) {
                         tokio::time::sleep(Duration::from_millis(100)).await;
                         continue;
                     }
@@ -409,6 +448,11 @@ impl Client {
                         "serverError",
                         error["message"].as_str().unwrap_or("Language-server error"),
                     ));
+                }
+                if navigation_request && self.inner.analysis.borrow().revision != revision {
+                    // Indexing changed while this query was in flight. Even if
+                    // the server is ready again, this response may be incomplete.
+                    continue;
                 }
                 return Ok(response
                     .get_mut("result")
@@ -462,6 +506,146 @@ mod tests {
             .into()];
         let uri = uri(&path).unwrap();
         (root, server, uri)
+    }
+
+    #[tokio::test]
+    async fn navigation_waits_for_initial_analysis_status() {
+        let (root, mut server, uri) = fixture();
+        server
+            .env
+            .insert("PEER_FAKE_ANALYSIS".into(), "startup".into());
+        let client = Client::start(&server, root.path()).await.unwrap();
+        let query = client.request(
+            "textDocument/definition",
+            json!({"textDocument":{"uri":uri},"position":{"line":2,"character":1}}),
+            Duration::from_secs(2),
+        );
+        tokio::pin!(query);
+        // The barrier replies after any prematurely issued query. No sleep or
+        // timing threshold is needed to expose an empty result during startup.
+        tokio::select! {
+            biased;
+            result = &mut query => panic!("Query finished before analysis was ready: {result:?}"),
+            result = client.request("fixture/barrier", Value::Null, Duration::from_secs(2)) => {
+                result.unwrap();
+            }
+        }
+        client.notify("fixture/analysisReady", Value::Null).unwrap();
+        let result = query.await.unwrap();
+        assert_eq!(result[0]["range"]["start"]["line"], 1);
+        client.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn navigation_reissues_results_invalidated_by_analysis_transitions() {
+        let (root, mut server, uri) = fixture();
+        server
+            .env
+            .insert("PEER_FAKE_ANALYSIS".into(), "inflight".into());
+        let client = Client::start(&server, root.path()).await.unwrap();
+        for (method, expected_line) in [
+            ("textDocument/definition", 1),
+            ("textDocument/references", 2),
+        ] {
+            let result = client
+                .request(
+                    method,
+                    json!({"textDocument":{"uri":uri},"position":{"line":2,"character":1}}),
+                    Duration::from_secs(2),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                result[0]["range"]["start"]["line"], expected_line,
+                "{method}"
+            );
+        }
+        // A ready server's genuinely empty response must not enter a retry loop.
+        let empty = client
+            .request(
+                "textDocument/definition",
+                json!({"textDocument":{"uri":uri},"position":{"line":1,"character":12}}),
+                Duration::from_secs(2),
+            )
+            .await
+            .unwrap();
+        assert_eq!(empty, json!([]));
+        client.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn cancelling_an_analysis_wait_does_not_poison_later_navigation() {
+        let (root, mut server, uri) = fixture();
+        server
+            .env
+            .insert("PEER_FAKE_ANALYSIS".into(), "busy".into());
+        let client = Client::start(&server, root.path()).await.unwrap();
+        let params = json!({"textDocument":{"uri":uri},"position":{"line":2,"character":1}});
+        let task_client = client.clone();
+        let task_params = params.clone();
+        let mut query = tokio::spawn(async move {
+            task_client
+                .request(
+                    "textDocument/definition",
+                    task_params,
+                    Duration::from_secs(5),
+                )
+                .await
+        });
+        tokio::select! {
+            biased;
+            result = &mut query => panic!("Query finished while analysis was busy: {result:?}"),
+            result = client.request("fixture/barrier", Value::Null, Duration::from_secs(2)) => {
+                result.unwrap();
+            }
+        }
+        query.abort();
+        assert!(query.await.unwrap_err().is_cancelled());
+        client.notify("fixture/analysisReady", Value::Null).unwrap();
+        let result = client
+            .request("textDocument/definition", params, Duration::from_secs(2))
+            .await
+            .unwrap();
+        assert_eq!(result[0]["range"]["start"]["line"], 1);
+        client.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn analysis_waits_respect_deadlines_and_server_exit() {
+        let (root, mut server, uri) = fixture();
+        server
+            .env
+            .insert("PEER_FAKE_ANALYSIS".into(), "busy".into());
+        let client = Client::start(&server, root.path()).await.unwrap();
+        let params = json!({"textDocument":{"uri":uri},"position":{"line":2,"character":1}});
+        let error = tokio::time::timeout(
+            Duration::from_secs(2),
+            client.request(
+                "textDocument/definition",
+                params.clone(),
+                Duration::from_millis(50),
+            ),
+        )
+        .await
+        .expect("Waiting for analysis exceeded the request deadline")
+        .unwrap_err();
+        assert_eq!(error.code, "timeout");
+        let query = client.request("textDocument/definition", params, Duration::from_secs(5));
+        tokio::pin!(query);
+        tokio::select! {
+            biased;
+            result = &mut query => panic!("Query finished while analysis was busy: {result:?}"),
+            result = client.request("fixture/barrier", Value::Null, Duration::from_secs(2)) => {
+                result.unwrap();
+            }
+        }
+        client.notify("fixture/crash", Value::Null).unwrap();
+        let error = tokio::time::timeout(Duration::from_secs(2), query)
+            .await
+            .expect("Server exit did not wake the analysis wait")
+            .unwrap_err();
+        assert_eq!(error.code, "serverError");
+        client.shutdown().await;
     }
 
     #[tokio::test]

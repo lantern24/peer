@@ -2,6 +2,18 @@
 
 Reference machine: Apple M2, macOS 26.5.2 (25F84 / Darwin 25.5.0). The native app uses WKWebView with a configured 1440 × 940 window. The test-only configuration keeps its window above other windows to avoid occlusion-related rendering pauses; production windows retain normal behavior. Development tools: Rust 1.88 and Node.js 26.7.
 
+## Rust analysis readiness — 2026-10-14 JST
+
+A direct rust-analyzer protocol trace confirmed the intermittent empty-result race: the server returned `[]` for a cross-file function while reporting `quiescent: false`; the identical request returned its definition after `quiescent: true`. Peer previously ignored those notifications. Its opt-in Rust smoke test also retried empty responses during startup, hiding the first-request failure.
+
+The client now advertises `experimental.serverStatusNotification`, waits for rust-analyzer's first ready notification, and tracks readiness transitions across in-flight definition/reference requests. Results produced across an analysis transition are reissued within the same request deadline, even if the server is already ready again when the reply is consumed. Genuine empty results from a ready server are not retried. Initialization and shutdown are not gated; cancellation, timeouts, and server exits remain actionable.
+
+The startup regression failed before the implementation with `Query finished before analysis was ready: Ok(Array [])` and passed afterward. Four permanent protocol regressions cover the initial notification race, in-flight invalidation, genuine empty results, cancelled waiters, shared deadlines, and waking waiters when the server exits. The real Rust scenario now requires its first request and three subsequent cold server restarts to resolve without test-side polling.
+
+`cargo test -p peer-core --locked` passed all 45 regular tests. Both opt-in real-server suites passed, including Go, TypeScript, JavaScript, Python, and Rust. Rust formatting passed; Clippy completed with only the existing `repository.rs` `chunks_exact` warning.
+
+After `npm run build:test-app`, a native WKWebView smoke reopened a Rust workspace five times and issued exactly one F12 per cold open. Every first request opened the expected definition without user retries or a transient no-definitions result. The destination screenshot was inspected. The temporary native smoke spec was removed. This is local macOS verification, not an additional hosted-CI or older-WebKit run.
+
 ## Language-server PATH recovery and preset coverage — 2026-10-14 JST
 
 The shared macOS stdio launcher now recovers the interactive login-shell `PATH` for every language server, rather than relying on Finder's restricted environment. Explicit server `env.PATH` values remain authoritative, including for absolute executables' child tools. Discovery is cached, bounded to five seconds and 64 KiB of output, and does not mutate the app's process environment.

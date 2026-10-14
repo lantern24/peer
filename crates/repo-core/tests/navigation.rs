@@ -856,27 +856,35 @@ async fn real_language_servers_resolve_scopes_imports_methods_and_references() {
             }
         };
         let call = position(marker, "asdf");
-        let mut result = None;
-        let mut last_error = String::new();
-        for _ in 0..50 {
-            match app
-                .navigate_symbol(request(&snapshot, "new", file, call.line, call.character))
+        let result = if language == "rust" {
+            // One user request must await readiness; a test-side polling loop
+            // previously hid rust-analyzer's empty responses during startup.
+            app.navigate_symbol(request(&snapshot, "new", file, call.line, call.character))
                 .await
-            {
-                Ok(value) if !value.locations.is_empty() => {
-                    result = Some(value);
-                    break;
+                .unwrap()
+        } else {
+            let mut result = None;
+            let mut last_error = String::new();
+            for _ in 0..50 {
+                match app
+                    .navigate_symbol(request(&snapshot, "new", file, call.line, call.character))
+                    .await
+                {
+                    Ok(value) if !value.locations.is_empty() => {
+                        result = Some(value);
+                        break;
+                    }
+                    Ok(_) => {}
+                    Err(error) if error.code == "serverError" => {
+                        last_error = error.message;
+                    }
+                    Err(error) => panic!("{language}: {error:?}"),
                 }
-                Ok(_) => {}
-                Err(error) if error.code == "serverError" => {
-                    last_error = error.message;
-                }
-                Err(error) => panic!("{language}: {error:?}"),
+                tokio::time::sleep(Duration::from_millis(200)).await;
             }
-            tokio::time::sleep(Duration::from_millis(200)).await;
-        }
-        let result = result
-            .unwrap_or_else(|| panic!("{language}: no definition after indexing: {last_error}"));
+            result
+                .unwrap_or_else(|| panic!("{language}: no definition after indexing: {last_error}"))
+        };
         assert_eq!(
             result.locations[0].path, definition,
             "{language}: {result:?}"
@@ -920,6 +928,22 @@ async fn real_language_servers_resolve_scopes_imports_methods_and_references() {
             result.locations[0].range.start.line, shadow.line,
             "{language}: shadowed declaration"
         );
+        if language == "rust" {
+            for restart in 0..3 {
+                app.shutdown_navigation().await;
+                let result = app
+                    .navigate_symbol(request(&snapshot, "new", file, call.line, call.character))
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    result.locations.len(),
+                    1,
+                    "Rust restart {restart}: {result:?}"
+                );
+                assert_eq!(result.locations[0].path, definition);
+            }
+        }
+        app.shutdown_navigation().await;
     }
 }
 

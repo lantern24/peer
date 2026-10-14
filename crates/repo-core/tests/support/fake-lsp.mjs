@@ -7,12 +7,23 @@ let buffer = Buffer.alloc(0),
 const documents = new Map();
 const failures = new Map();
 const errorFixture = JSON.parse(process.env.PEER_FAKE_ERRORS ?? "null");
+const analysisFixture = process.env.PEER_FAKE_ANALYSIS;
+let analysisReady = !analysisFixture,
+  reportsStatus = false;
 const send = (value) => {
   const bytes = Buffer.from(JSON.stringify({ jsonrpc: "2.0", ...value }));
   // Exercise framing with headers and bodies delivered separately.
   process.stdout.write(`Content-Length: ${bytes.length}\r\n\r\n`);
   process.stdout.write(bytes);
 };
+function analysisStatus(quiescent) {
+  analysisReady = quiescent;
+  if (reportsStatus)
+    send({
+      method: "experimental/serverStatus",
+      params: { health: "ok", quiescent },
+    });
+}
 const walk = (directory, extension) =>
   fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     if (entry.name.startsWith(".") || entry.name === "node_modules") return [];
@@ -48,11 +59,14 @@ function receive(message) {
     });
   } else if (method === "initialize") {
     root = fileURLToPath(params.rootUri);
+    reportsStatus =
+      params.capabilities.experimental?.serverStatusNotification === true;
     if (process.env.PEER_FAKE_LOG)
       fs.appendFileSync(process.env.PEER_FAKE_LOG, `${root}\n`);
     send({
       id,
       result: {
+        ...(analysisFixture ? { serverInfo: { name: "rust-analyzer" } } : {}),
         capabilities: {
           definitionProvider: process.env.PEER_FAKE_UNSUPPORTED !== "1",
           referencesProvider: true,
@@ -61,12 +75,17 @@ function receive(message) {
       },
     });
   } else if (method === "initialized") {
+    if (analysisFixture === "inflight") analysisStatus(true);
+    if (analysisFixture === "busy") analysisStatus(false);
     send({
       id: "config",
       method: "workspace/configuration",
       params: { items: [{ section: "fixture" }] },
     });
-  } else if (method === "textDocument/didOpen")
+  } else if (method === "fixture/barrier") send({ id, result: null });
+  else if (method === "fixture/analysisReady") analysisStatus(true);
+  else if (method === "fixture/crash") process.exit(2);
+  else if (method === "textDocument/didOpen")
     documents.set(params.textDocument.uri, params.textDocument.text);
   else if (method === "shutdown") send({ id, result: null });
   else if (method === "exit") process.exit(0);
@@ -74,6 +93,19 @@ function receive(message) {
     method === "textDocument/definition" ||
     method === "textDocument/references"
   ) {
+    if (!analysisReady) {
+      send({ id, result: [] });
+      return;
+    }
+    if (analysisFixture === "inflight" && !failures.has(method)) {
+      failures.set(method, 1);
+      analysisStatus(false);
+      send({ id, result: [] });
+      // Becoming ready before the client consumes the reply must not make
+      // this old result valid: the query ran against incomplete analysis.
+      analysisStatus(true);
+      return;
+    }
     if (errorFixture) {
       const key = `${method}:${params.textDocument.uri}`;
       const count = failures.get(key) ?? 0;
