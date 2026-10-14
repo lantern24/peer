@@ -13,13 +13,13 @@ const send = (value) => {
   process.stdout.write(`Content-Length: ${bytes.length}\r\n\r\n`);
   process.stdout.write(bytes);
 };
-const walk = (directory) =>
+const walk = (directory, extension) =>
   fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     if (entry.name.startsWith(".") || entry.name === "node_modules") return [];
     const name = path.join(directory, entry.name);
     return entry.isDirectory()
-      ? walk(name)
-      : /\.(ts|js)$/.test(name)
+      ? walk(name, extension)
+      : path.extname(name) === extension
         ? [name]
         : [];
   });
@@ -113,15 +113,19 @@ function receive(message) {
     }
     const results = [];
     if (word)
-      for (const name of walk(root)) {
+      for (const name of walk(
+        root,
+        path.extname(fileURLToPath(params.textDocument.uri)),
+      )) {
         const lines = fs.readFileSync(name, "utf8").split("\n");
         lines.forEach((line, index) => {
           for (const occurrence of line.matchAll(
             new RegExp(`\\b${word}\\b`, "g"),
           )) {
-            const declaration = /(?:const|let|var|function)\s+$/.test(
-              line.slice(0, occurrence.index),
-            );
+            const declaration =
+              /(?:const|let|var|function|func|def|fn)\s+$/.test(
+                line.slice(0, occurrence.index),
+              );
             if (method.endsWith("/definition") ? declaration : !declaration)
               results.push({
                 uri: pathToFileURL(name).href,

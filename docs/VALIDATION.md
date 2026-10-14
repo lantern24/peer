@@ -2,6 +2,18 @@
 
 Reference machine: Apple M2, macOS 26.5.2 (25F84 / Darwin 25.5.0). The native app uses WKWebView with a configured 1440 × 940 window. The test-only configuration keeps its window above other windows to avoid occlusion-related rendering pauses; production windows retain normal behavior. Development tools: Rust 1.88 and Node.js 26.7.
 
+## Language-server PATH recovery and preset coverage — 2026-10-14 JST
+
+The shared macOS stdio launcher now recovers the interactive login-shell `PATH` for every language server, rather than relying on Finder's restricted environment. Explicit server `env.PATH` values remain authoritative, including for absolute executables' child tools. Discovery is cached, bounded to five seconds and 64 KiB of output, and does not mutate the app's process environment.
+
+The permanent navigation regression runs in a subprocess with an isolated home and Finder-style `PATH`. It keeps all presets enabled and resolves definitions and references for every registered extension: Go; TypeScript/JavaScript including TSX, JSX, MTS, CTS, MJS, and CJS; Python and Python stubs; Rust; and a custom server. Each is exercised with shell discovery, an absolute executable, and an explicit `PATH`. It also checks missing-executable versus missing-runtime failures, override precedence after shell-path caching, startup banners, paths containing spaces, and unchanged parent `PATH`. Node shebang launchers model the npm servers; separate child-runtime launchers model native-server/toolchain lookup. These deterministic protocol fixtures are not semantic analyzers.
+
+`cargo test -p peer-core --locked` passed all 41 regular tests. Both opt-in real-server tests passed separately, covering Go, TypeScript, JavaScript, Rust, and Python semantic navigation.
+
+A standalone API smoke then launched real `gopls`, `typescript-language-server`, `pyright-langserver`, and `rust-analyzer` by their default executable names under Finder-style `PATH`. An isolated login-shell profile supplied the installed tool locations. Cross-file definitions and references resolved for all five languages; source files and Git indexes remained unchanged. Existing cached TypeScript 5.9.3/typescript-language-server 5.0.1 and Pyright 1.1.407 installations were reused without installing global tools. The temporary smoke program was removed.
+
+The preceding native WKWebView smoke also exercised F12 with real rust-analyzer under Finder-style `PATH`, inspected the destination screenshot, and verified the visible error for an actually missing server. The all-language follow-up used the core API, not five additional UI scenarios. Verification is local on macOS; no new GitHub-hosted run is claimed.
+
 ## Split-diff scrollbar command race — 2026-10-13 JST
 
 [Run 38385845221](https://github.com/lantern24/peer/actions/runs/38385845221/job/115257311625) failed the narrow-window scenario while waiting for Home to return every code column to zero. The uploaded artifacts show that unified mode completed and the failure occurred in split mode. The renderer's split-scroll manager retains a code-side scroll leader for 300 ms, while Peer's scrollbar previously wrote only the wider column; a previous leader could ignore or undo the command.

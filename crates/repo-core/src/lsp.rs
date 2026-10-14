@@ -83,9 +83,90 @@ fn configuration(settings: &Value, section: Option<&str>) -> Value {
         .unwrap_or(Value::Null)
 }
 
+// Finder does not inherit the user's terminal PATH. Recover it once, only for
+// language-server children; never mutate the multithreaded app's environment.
+#[cfg(target_os = "macos")]
+async fn login_shell_path() -> Option<&'static std::ffi::OsStr> {
+    static PATH: tokio::sync::OnceCell<Option<std::ffi::OsString>> =
+        tokio::sync::OnceCell::const_new();
+    PATH.get_or_init(|| async {
+        match read_login_shell_path().await {
+            Ok(path) => Some(path),
+            Err(error) => {
+                eprintln!("Cannot read login-shell PATH: {error}; using inherited PATH");
+                None
+            }
+        }
+    })
+    .await
+    .as_deref()
+}
+
+#[cfg(target_os = "macos")]
+async fn read_login_shell_path() -> std::io::Result<std::ffi::OsString> {
+    use std::{ffi::OsString, io, os::unix::ffi::OsStringExt};
+
+    const LIMIT: u64 = 64 * 1024;
+    let shell = std::env::var_os("SHELL")
+        .filter(|shell| !shell.is_empty())
+        .unwrap_or_else(|| "/bin/zsh".into());
+    let mut child = Command::new(shell)
+        .args(["-ilc", "printf '\\0PEER_PATH\\0%s\\0' \"$PATH\""])
+        // Do not run shell startup files in the repository being inspected.
+        .current_dir(std::env::var_os("HOME").unwrap_or_else(|| "/".into()))
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true)
+        .spawn()?;
+    let result = tokio::time::timeout(Duration::from_secs(5), async {
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| io::Error::other("Missing shell stdout"))?;
+        let mut bytes = Vec::new();
+        stdout.take(LIMIT + 1).read_to_end(&mut bytes).await?;
+        if bytes.len() as u64 > LIMIT {
+            return Err(io::Error::other("Shell startup output exceeded 64 KiB"));
+        }
+        let status = child.wait().await?;
+        if !status.success() {
+            return Err(io::Error::other(format!(
+                "Login shell exited with {status}"
+            )));
+        }
+        // NUL framing excludes startup banners without trimming valid path bytes.
+        let mut fields = bytes.split(|byte| *byte == 0);
+        let path = fields
+            .find(|field| *field == b"PEER_PATH")
+            .and_then(|_| fields.next())
+            .filter(|path| !path.is_empty())
+            .ok_or_else(|| io::Error::other("Login shell did not return PATH"))?;
+        Ok(OsString::from_vec(path.to_vec()))
+    })
+    .await
+    .unwrap_or_else(|_| {
+        Err(io::Error::new(
+            io::ErrorKind::TimedOut,
+            "Login-shell PATH discovery timed out",
+        ))
+    });
+    if result.is_err() {
+        // kill() also reaps the shell on timeout or excessive startup output.
+        let _ = child.kill().await;
+    }
+    result
+}
+
 impl Client {
     pub async fn start(config: &LanguageServer, root: &Path) -> Result<Self, NavigationError> {
         let mut command = Command::new(&config.executable);
+        #[cfg(target_os = "macos")]
+        if !config.env.contains_key("PATH") {
+            if let Some(path) = login_shell_path().await {
+                command.env("PATH", path);
+            }
+        }
         command
             .args(&config.args)
             .envs(&config.env)

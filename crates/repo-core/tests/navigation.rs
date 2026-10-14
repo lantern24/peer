@@ -518,6 +518,254 @@ async fn configured_server_runtime_path_is_authoritative_under_finder_path() {
     app.shutdown_navigation().await;
 }
 
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn login_shell_path_launches_servers_and_their_toolchains_from_finder() {
+    use std::os::unix::{fs::symlink, fs::PermissionsExt};
+
+    const CHILD_HOME: &str = "PEER_NAVIGATION_SHELL_TEST_HOME";
+    const FINDER_PATH: &str = "/usr/bin:/bin:/usr/sbin:/sbin";
+    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/support/fake-lsp.mjs");
+    let mut servers = default_servers();
+    let mut custom = servers
+        .iter()
+        .find(|server| server.id == "typescript")
+        .unwrap()
+        .clone();
+    custom.id = "custom".into();
+    custom.name = "Custom server".into();
+    custom.executable = "peer-navigation-shell-server".into();
+    custom.languages = [("peer".into(), "plaintext".into())].into();
+    custom.args.clear();
+    servers.push(custom);
+    for server in &mut servers {
+        server
+            .env
+            .insert("PEER_FAKE_SCRIPT".into(), script.to_str().unwrap().into());
+    }
+    let home = match std::env::var_os(CHILD_HOME) {
+        Some(path) => std::path::PathBuf::from(path),
+        None => {
+            let node = Command::new("node")
+                .args(["-p", "process.execPath"])
+                .output()
+                .unwrap();
+            assert!(node.status.success());
+            let node = String::from_utf8(node.stdout).unwrap();
+            let temporary = tempfile::tempdir().unwrap();
+            let home = temporary.path();
+            fs::create_dir(home.join("server bin")).unwrap();
+            fs::create_dir(home.join("runtime bin")).unwrap();
+            symlink(
+                node.trim(),
+                home.join("runtime bin/peer-navigation-shell-runtime"),
+            )
+            .unwrap();
+            symlink(node.trim(), home.join("runtime bin/node")).unwrap();
+            for server in &servers {
+                let launcher = home.join("server bin").join(&server.executable);
+                // npm-installed servers use env's shebang lookup for Node.
+                // Native servers/shims must also pass PATH to their toolchains.
+                let body = if matches!(server.id.as_str(), "typescript" | "python") {
+                    format!(
+                        "#!/usr/bin/env node\nimport {};\n",
+                        serde_json::to_string(url::Url::from_file_path(&script).unwrap().as_str())
+                            .unwrap()
+                    )
+                } else {
+                    "#!/bin/sh\nexec peer-navigation-shell-runtime \"$PEER_FAKE_SCRIPT\" \"$@\"\n"
+                        .into()
+                };
+                fs::write(&launcher, body).unwrap();
+                fs::set_permissions(&launcher, fs::Permissions::from_mode(0o755)).unwrap();
+            }
+            // Both login and interactive startup files contribute to the PATH.
+            // Startup banners and spaces in directories must not corrupt it.
+            fs::write(
+                home.join(".zprofile"),
+                "printf 'login banner\\n'\nexport PATH=\"$HOME/server bin:$PATH\"\n",
+            )
+            .unwrap();
+            fs::write(
+                home.join(".zshrc"),
+                "printf 'interactive banner\\n'\nexport PATH=\"$HOME/runtime bin:$PATH\"\n",
+            )
+            .unwrap();
+            let output = Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "login_shell_path_launches_servers_and_their_toolchains_from_finder",
+                    "--nocapture",
+                ])
+                .env_clear()
+                .env("PATH", FINDER_PATH)
+                .env("HOME", home)
+                .env("ZDOTDIR", home)
+                .env("SHELL", "/bin/zsh")
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env(CHILD_HOME, home)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "isolated navigation test failed:\n{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        }
+    };
+    assert_eq!(std::env::var("PATH").unwrap(), FINDER_PATH);
+    let (repo, _store, app) = fixture();
+    // Keep every preset enabled to exercise extension-based dispatch, not just
+    // a renamed TypeScript server. These are protocol fixtures, not analyzers.
+    for server in &servers {
+        for extension in server.languages.keys() {
+            let symbol = format!("answer_{extension}");
+            let (caller, definition) = match server.id.as_str() {
+                "go" => (
+                    format!("package main\nfunc caller() {{ {symbol}() }}\n"),
+                    format!("package main\nfunc {symbol}() int {{ return 42 }}\n"),
+                ),
+                "rust" => (
+                    format!("mod defs_{extension};\npub fn caller() -> i32 {{ defs_{extension}::{symbol}() }}\n"),
+                    format!("pub fn {symbol}() -> i32 {{ 42 }}\n"),
+                ),
+                "python" => (
+                    format!("from defs_{extension} import {symbol}\n{symbol}()\n"),
+                    format!("def {symbol}():\n    return 42\n"),
+                ),
+                _ => (
+                    format!("import {{ {symbol} }} from './defs_{extension}';\n{symbol}();\n"),
+                    format!("export function {symbol}() {{ return 42; }}\n"),
+                ),
+            };
+            fs::write(
+                repo.path().join(format!("call_{extension}.{extension}")),
+                caller,
+            )
+            .unwrap();
+            fs::write(
+                repo.path().join(format!("defs_{extension}.{extension}")),
+                definition,
+            )
+            .unwrap();
+        }
+    }
+    let mut preferences = app.store.read().unwrap().preferences;
+    preferences.language_servers = servers.clone();
+    app.save_preferences(preferences.clone()).unwrap();
+    let snapshot = app
+        .open_repository(repo.path().to_str().unwrap(), Some(Comparison::default()))
+        .await
+        .unwrap();
+    let configured_path = std::env::join_paths([home.join("server bin"), home.join("runtime bin")])
+        .unwrap()
+        .into_string()
+        .unwrap();
+    for (index, server) in servers.iter().enumerate() {
+        let absolute = home
+            .join("server bin")
+            .join(&server.executable)
+            .into_os_string()
+            .into_string()
+            .unwrap();
+        for (mode, executable, path) in [
+            ("shell PATH", server.executable.as_str(), None),
+            ("absolute executable", absolute.as_str(), None),
+            (
+                "configured PATH",
+                server.executable.as_str(),
+                Some(&configured_path),
+            ),
+        ] {
+            let configured = &mut preferences.language_servers[index];
+            configured.executable = executable.into();
+            configured.env.remove("PATH");
+            if let Some(path) = path {
+                configured.env.insert("PATH".into(), path.clone());
+            }
+            app.save_preferences(preferences.clone()).unwrap();
+            for extension in server.languages.keys() {
+                let caller = format!("call_{extension}.{extension}");
+                let target = format!("defs_{extension}.{extension}");
+                let text = fs::read_to_string(repo.path().join(&caller)).unwrap();
+                let character = text
+                    .lines()
+                    .nth(1)
+                    .unwrap()
+                    .find(&format!("answer_{extension}"))
+                    .unwrap() as u32;
+                let definition = app
+                    .navigate_symbol(request(&snapshot, "new", &caller, 1, character))
+                    .await
+                    .unwrap_or_else(|error| panic!("{} .{extension} {mode}: {error:?}", server.id));
+                assert_eq!(definition.kind, "definitions");
+                assert_eq!(definition.locations[0].path, target);
+                assert_eq!(
+                    source(&app, &definition).await,
+                    fs::read_to_string(repo.path().join(&target)).unwrap()
+                );
+                let position = definition.locations[0].range.start;
+                let references = app
+                    .navigate_symbol(request(
+                        &snapshot,
+                        "new",
+                        &target,
+                        position.line,
+                        position.character,
+                    ))
+                    .await
+                    .unwrap();
+                assert_eq!(references.kind, "references");
+                assert!(
+                    references
+                        .locations
+                        .iter()
+                        .any(|location| location.path == caller
+                            && location.range.start == Position { line: 1, character }),
+                    "{} .{extension} {mode}: {references:?}",
+                    server.id
+                );
+            }
+            app.shutdown_navigation().await;
+        }
+        let extension = server.languages.keys().next().unwrap();
+        let caller = format!("call_{extension}.{extension}");
+        // Neither cached shell PATH nor inherited tools may bypass an explicit
+        // override: missing executable and missing child runtime are distinct.
+        for (executable, path, error) in [
+            (
+                server.executable.as_str(),
+                home.join("runtime bin"),
+                "missingServer",
+            ),
+            (absolute.as_str(), home.join("server bin"), "serverError"),
+        ] {
+            let configured = &mut preferences.language_servers[index];
+            configured.executable = executable.into();
+            configured
+                .env
+                .insert("PATH".into(), path.to_str().unwrap().into());
+            app.save_preferences(preferences.clone()).unwrap();
+            assert_eq!(
+                app.navigate_symbol(request(&snapshot, "new", &caller, 1, 1))
+                    .await
+                    .unwrap_err()
+                    .code,
+                error,
+                "{}",
+                server.id
+            );
+            app.shutdown_navigation().await;
+        }
+        println!("{}: all extensions resolved definitions/references; PATH and runtime failures respected", server.id);
+    }
+    assert_eq!(std::env::var("PATH").unwrap(), FINDER_PATH);
+    app.shutdown_navigation().await;
+}
+
 #[tokio::test]
 #[ignore = "requires gopls, typescript-language-server and rust-analyzer with their toolchains"]
 async fn real_language_servers_resolve_scopes_imports_methods_and_references() {
