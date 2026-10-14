@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.3](https://github.com/lantern24/peer/compare/v0.1.2...v0.1.3) (2026-10-14)
+
+
+### Bug Fixes
+
+* **comments:** Open the editor reliably from gutter clicks ([#14](https://github.com/lantern24/peer/issues/14)) ([72e854c](https://github.com/lantern24/peer/commit/72e854cd1a3c5bcb6d2e6de539cc6caa90c49959))
+* **navigation:** Recover shell PATH for all language servers ([#10](https://github.com/lantern24/peer/issues/10)) ([f932144](https://github.com/lantern24/peer/commit/f9321445f63e94a78d65176b15aa933dc8eac343))
+
 ## [0.1.2](https://github.com/lantern24/peer/compare/v0.1.1...v0.1.2) (2026-10-13)
 
 
