@@ -2,6 +2,8 @@
 
 A local, read-only repository viewer and review workspace. Built with Tauri 2, React, TypeScript, and an independent Rust core. Git is required on the user's machine; Node.js and Rust are development dependencies only.
 
+https://github.com/user-attachments/assets/77ac7a39-e9c2-4f31-b5c6-004037a5f003
+
 Licensed under [Apache-2.0](LICENSE). Bundled dependencies and themes retain their [third-party notices](THIRD_PARTY_NOTICES.md).
 
 ## Install with Homebrew
