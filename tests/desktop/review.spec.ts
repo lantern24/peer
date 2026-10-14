@@ -104,6 +104,102 @@ async function addFileComment(body: string) {
   );
 }
 
+async function clickLineComment(
+  line: number,
+  type: "context" | "change-addition" | "change-deletion",
+  path = "src/module-000.ts",
+) {
+  const selector = `[data-column-number="${line}"][data-line-type="${type}"]`;
+  const headerSelector = `[data-file-path="${path}"]`;
+  await browser.waitUntil(() =>
+    browser.execute(
+      (selector, headerSelector) =>
+        !!document
+          .querySelector(headerSelector)
+          ?.closest("diffs-container")
+          ?.shadowRoot?.querySelector(selector),
+      selector,
+      headerSelector,
+    ),
+  );
+  // The embedded driver emits mouse events, not the pointer events used by
+  // the renderer. Exercise hover and the full press/release path explicitly.
+  await browser.execute(
+    async (selector, headerSelector) => {
+      const host = document
+        .querySelector(headerSelector)
+        ?.closest("diffs-container");
+      const gutter = host?.shadowRoot?.querySelector(selector);
+      if (!gutter) throw new Error("Comment line is not rendered");
+      gutter.dispatchEvent(
+        new PointerEvent("pointermove", {
+          bubbles: true,
+          composed: true,
+          pointerType: "mouse",
+          pointerId: 1,
+        }),
+      );
+      const button = host?.querySelector<HTMLButtonElement>(
+        '[aria-label="Comment on line"]',
+      );
+      if (!button || !button.getBoundingClientRect().height)
+        throw new Error("Line comment button is not visible");
+      const rect = button.getBoundingClientRect();
+      const pointer = {
+        bubbles: true,
+        composed: true,
+        cancelable: true,
+        pointerType: "mouse",
+        pointerId: 1,
+        button: 0,
+        clientX: rect.left + rect.width / 2,
+        clientY: rect.top + rect.height / 2,
+      };
+      // A direct button dispatch bypasses overlays and disabled pointer input.
+      // Resolve the real hit target through the renderer's shadow root first.
+      let target = document.elementFromPoint(pointer.clientX, pointer.clientY);
+      while (target?.shadowRoot) {
+        const inner = target.shadowRoot.elementFromPoint(
+          pointer.clientX,
+          pointer.clientY,
+        );
+        if (!inner || inner === target) break;
+        target = inner;
+      }
+      if (!target || !button.contains(target))
+        throw new Error(
+          `Comment button is not hit-testable: ${target?.outerHTML.slice(0, 500)}`,
+        );
+      const pressed = target.dispatchEvent(
+        new PointerEvent("pointerdown", { ...pointer, buttons: 1 }),
+      );
+      if (pressed) {
+        const mousePressed = target.dispatchEvent(
+          new MouseEvent("mousedown", { ...pointer, buttons: 1 }),
+        );
+        // Dispatched events have no native default focus action.
+        if (mousePressed) button.focus();
+      }
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => resolve()),
+      );
+      const released = button.getBoundingClientRect();
+      if (
+        pointer.clientX < released.left ||
+        pointer.clientX >= released.right ||
+        pointer.clientY < released.top ||
+        pointer.clientY >= released.bottom
+      )
+        throw new Error("Line comment button moved before the click completed");
+      target.dispatchEvent(new PointerEvent("pointerup", pointer));
+      target.dispatchEvent(new MouseEvent("mouseup", pointer));
+      target.dispatchEvent(new MouseEvent("click", pointer));
+    },
+    selector,
+    headerSelector,
+  );
+}
+
 describe("Peer in the native webview", () => {
   let originalPreferences: Preferences;
   const originalFiles = new Map<string, string>();
@@ -714,13 +810,181 @@ describe("Peer in the native webview", () => {
     await click('[aria-label="Close dialog"]');
   });
 
+  for (const view of ["Code", "unified", "split"] as const) {
+    it(`focuses the comment editor after one click, including the same line, in ${view}`, async () => {
+      if (view === "Code") await switchView("Code");
+      if (view === "split") await click('[aria-label="Toggle diff layout"]');
+      const type = view === "Code" ? "context" : "change-addition";
+      await click('[aria-label="Close feedback"]');
+      await clickLineComment(2, type);
+      await expect($('[aria-label="Comment text"]')).toBeFocused();
+      // Send keys to the active element: setValue would focus the textarea
+      // itself and conceal a failed handoff from the gutter button.
+      await browser.keys("First");
+      await expect($('[aria-label="Comment text"]')).toHaveValue("First");
+      await clickLineComment(2, type);
+      await expect($('[aria-label="Comment text"]')).toBeFocused();
+      await browser.keys(" same");
+      await expect($('[aria-label="Comment text"]')).toHaveValue("First same");
+      await clickLineComment(4, type);
+      await expect($('[aria-label="Comment text"]')).toBeFocused();
+      await browser.keys(" moved");
+      await expect($('[aria-label="Comment text"]')).toHaveValue(
+        "First same moved",
+      );
+      await expect($(".comment-composer .comment-location")).toHaveText(
+        "line 4",
+      );
+      await click('[aria-label="Close feedback"]');
+      await clickLineComment(4, type);
+      await expect($('[aria-label="Comment text"]')).toBeFocused();
+      await browser.keys(" reopened");
+      await expect($('[aria-label="Comment text"]')).toHaveValue(
+        "First same moved reopened",
+      );
+      await browser.saveScreenshot(
+        resolve(`test-results/comment-single-click-${view}.png`),
+      );
+    });
+
+    it(`opens and retargets line comments from + in ${view} while keeping draft text`, async () => {
+      if (view === "Code") await switchView("Code");
+      if (view === "split") await click('[aria-label="Toggle diff layout"]');
+      for (const type of view === "Code"
+        ? (["context"] as const)
+        : (["change-deletion", "change-addition"] as const)) {
+        await click('.tree-file[title="src/module-000.ts"]');
+        await click('[aria-label="Close feedback"]');
+        await clickLineComment(2, type);
+        await expect($('[aria-label="Comment text"]')).toBeFocused();
+        await expect($(".comment-composer .comment-location")).toHaveText(
+          type === "change-deletion" ? "Old line 2" : "line 2",
+        );
+        await expect($(".comment-composer .comment-path")).toHaveText(
+          "src/module-000.ts",
+        );
+        await clickLineComment(4, type);
+        await expect($(".comment-composer .comment-location")).toHaveText(
+          type === "change-deletion" ? "Old line 4" : "line 4",
+        );
+        const body = `Keep this ${view} ${type} draft`;
+        await expect($('[aria-label="Comment text"]')).toBeFocused();
+        await browser.keys(body);
+        const targetType =
+          type === "context"
+            ? "context"
+            : type === "change-deletion"
+              ? "change-addition"
+              : "change-deletion";
+        await clickLineComment(6, targetType);
+        await expect($('[aria-label="Comment text"]')).toBeFocused();
+        await expect($('[aria-label="Comment text"]')).toHaveValue(body);
+        await expect($(".comment-composer .comment-location")).toHaveText(
+          targetType === "change-deletion" ? "Old line 6" : "line 6",
+        );
+        // Browsing does not move the draft; only an explicit comment action does.
+        await click('.tree-file[title="src/module-001.ts"]');
+        await expect($(".comment-composer .comment-path")).toHaveText(
+          "src/module-000.ts",
+        );
+        await clickLineComment(8, targetType, "src/module-001.ts");
+        await expect($('[aria-label="Comment text"]')).toBeFocused();
+        await expect($('[aria-label="Comment text"]')).toHaveValue(body);
+        await expect($(".comment-composer .comment-path")).toHaveText(
+          "src/module-001.ts",
+        );
+        await expect($(".comment-composer .comment-location")).toHaveText(
+          targetType === "change-deletion" ? "Old line 8" : "line 8",
+        );
+        await browser.saveScreenshot(
+          resolve(`test-results/line-comment-${view}-${type}.png`),
+        );
+        await browser.execute(() => {
+          const form =
+            document.querySelector<HTMLFormElement>(".comment-composer");
+          if (!form) throw new Error("Comment editor is not open");
+          form.requestSubmit();
+        });
+        await $(".comment-composer").waitForExist({ reverse: true });
+        const saved: { queues: Record<string, ReviewQueue> } = JSON.parse(
+          readFileSync(join(process.env.PEER_DATA_DIR!, "state.json"), "utf8"),
+        );
+        const comment = Object.values(saved.queues)
+          .flatMap((queue) => queue.comments)
+          .find((comment) => comment.body === body);
+        expect(comment?.path).toBe("src/module-001.ts");
+        expect(comment?.anchor.line).toBe(8);
+        expect(comment?.anchor.side).toBe(
+          targetType === "context"
+            ? undefined
+            : targetType === "change-deletion"
+              ? "old"
+              : "new",
+        );
+        expect(comment?.anchor.lineText).toContain("item1_7");
+      }
+    });
+  }
+
+  it("retargets between file and line comments without losing draft text", async () => {
+    await clickInPlace('[aria-label="Comment on file src/module-000.ts"]');
+    await expect($('[aria-label="Comment text"]')).toBeFocused();
+    await browser.keys("Move this review");
+    await browser.execute(() => {
+      const button = document.querySelector<HTMLButtonElement>(
+        '[aria-label="Comment on file src/module-000.ts"]',
+      );
+      if (!button) throw new Error("File comment button is not rendered");
+      button.focus();
+      button.click();
+    });
+    await expect($('[aria-label="Comment text"]')).toBeFocused();
+    await browser.keys(" context");
+    await clickLineComment(2, "change-deletion");
+    await expect($(".comment-composer .comment-location")).toHaveText(
+      "Old line 2",
+    );
+    await expect($('[aria-label="Comment text"]')).toHaveValue(
+      "Move this review context",
+    );
+    await click('.tree-file[title="src/module-001.ts"]');
+    await clickInPlace('[aria-label="Comment on file src/module-001.ts"]');
+    await expect($(".comment-composer .comment-path")).toHaveText(
+      "src/module-001.ts",
+    );
+    await expect($(".comment-composer .comment-location")).toHaveText(
+      "File comment",
+    );
+    await expect($('[aria-label="Comment text"]')).toHaveValue(
+      "Move this review context",
+    );
+    await expect($('[aria-label="Comment text"]')).toBeFocused();
+    await browser.execute(() => {
+      const form = document.querySelector<HTMLFormElement>(".comment-composer");
+      if (!form) throw new Error("Comment editor is not open");
+      form.requestSubmit();
+    });
+    await $(".comment-composer").waitForExist({ reverse: true });
+    const saved: { queues: Record<string, ReviewQueue> } = JSON.parse(
+      readFileSync(join(process.env.PEER_DATA_DIR!, "state.json"), "utf8"),
+    );
+    const comment = Object.values(saved.queues)
+      .flatMap((queue) => queue.comments)
+      .find((comment) => comment.body === "Move this review context");
+    expect(comment?.path).toBe("src/module-001.ts");
+    expect(comment?.scope).toBe("file");
+    expect(comment?.anchor.line).toBeUndefined();
+    expect(comment?.anchor.side).toBeUndefined();
+  });
+
   it("jumps beyond the viewport and saves a one-based line anchor and Reviewed state", async () => {
     await addFileComment("Please explain the value change.");
     await click('button[aria-label="Find in file"]');
     await $('input[aria-label="Go to line"]').setValue("80");
     await browser.keys("Enter");
-    await $('[aria-label="Comment on selected line"]').waitForExist();
-    await click('[aria-label="Comment on selected line"]');
+    await expect($('[aria-label="Comment text"]')).not.toExist();
+    await expect($('[aria-label="Comment on selected line"]')).not.toExist();
+    await clickLineComment(80, "change-addition");
     await $('[aria-label="Comment text"]').setValue("Can we name this value?");
     await $("button=Add comment").waitForEnabled();
     // Exercise native form submission; the embedded driver's synthetic click
@@ -1355,9 +1619,18 @@ describe("Peer in the native webview", () => {
           await click('button[aria-label="Find in file"]');
         await $('input[aria-label="Go to line"]').setValue("100");
         await browser.keys("Enter");
-        await $(
-          `[data-file-path="${target}"] [aria-label="Comment on selected line"]`,
-        ).waitForExist();
+        await browser.waitUntil(() =>
+          browser.execute(
+            (path) =>
+              !!document
+                .querySelector(`[data-file-path="${path}"]`)
+                ?.closest("diffs-container")
+                ?.shadowRoot?.querySelector(
+                  '[data-line="100"][data-selected-line]',
+                ),
+            target,
+          ),
+        );
         await browser.keys("Escape");
         await $(".viewer-horizontal-scrollbar").waitForDisplayed();
         await browser.execute(() => {

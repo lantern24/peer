@@ -107,6 +107,7 @@ export default function App() {
   const [settings, setSettings] = useState<SettingsTab | null>(null);
   const [feedback, setFeedback] = useState(true);
   const [drafts, setDrafts] = useState<Record<string, Draft | undefined>>({});
+  const [commentFocusRequest, setCommentFocusRequest] = useState(0);
   const [quickOpen, setQuickOpen] = useState(false);
   const [findOpen, setFindOpen] = useState(false);
   const [repositoryToUpdate, setRepositoryToUpdate] = useState<string | null>(
@@ -133,6 +134,7 @@ export default function App() {
   selectionRef.current = selected;
   const requests = useRef(new Map<string, Promise<LoadedFile>>());
   const opening = useRef(0);
+  const commentRequest = useRef(0);
   const prefWrites = useRef(Promise.resolve());
   const scrollTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
@@ -631,13 +633,14 @@ export default function App() {
       const s = snapshotRef.current;
       if (!s) return;
       setFeedback(true);
-      if (drafts[s.queueId]?.body.trim()) {
-        notify("Finish or discard your current draft before starting another.");
-        return;
-      }
+      const request = ++commentRequest.current;
       try {
         const { content } = await loadFile(id, true);
-        if (snapshotRef.current?.id !== s.id) return;
+        if (
+          snapshotRef.current?.id !== s.id ||
+          request !== commentRequest.current
+        )
+          return;
         setDrafts((prev) => ({
           ...prev,
           [s.queueId]: {
@@ -647,20 +650,26 @@ export default function App() {
             path: content.path,
             line,
             side,
-            body: "",
+            body: prev[s.queueId]?.body ?? "",
           },
         }));
+        setCommentFocusRequest(request);
       } catch (e) {
-        reportError(e);
+        if (
+          snapshotRef.current?.id === s.id &&
+          request === commentRequest.current
+        )
+          reportError(e);
       }
     },
-    [drafts, loadFile, notify, reportError],
+    [loadFile, reportError],
   );
   const submitComment = useCallback(async () => {
     const s = snapshotRef.current;
     if (!s) return;
     const draft = drafts[s.queueId];
     if (!draft?.body.trim()) return;
+    ++commentRequest.current;
     setSaving(true);
     try {
       let source = { snapshotId: draft.snapshotId, fileId: draft.fileId };
@@ -684,7 +693,9 @@ export default function App() {
         line: draft.line ?? null,
         side: draft.side ?? null,
       });
-      setDrafts((prev) => ({ ...prev, [s.queueId]: undefined }));
+      setDrafts((prev) =>
+        prev[s.queueId] === draft ? { ...prev, [s.queueId]: undefined } : prev,
+      );
       await reloadQueue();
       notify("Comment saved");
     } catch (e) {
@@ -1458,13 +1469,15 @@ export default function App() {
                   queue={queue}
                   view={snapshot.comparison.view}
                   draft={drafts[snapshot.queueId]}
+                  focusRequest={commentFocusRequest}
                   busy={saving}
-                  onDraft={(draft) =>
+                  onDraft={(draft) => {
+                    if (!draft) ++commentRequest.current;
                     setDrafts((prev) => ({
                       ...prev,
                       [snapshot.queueId]: draft,
-                    }))
-                  }
+                    }));
+                  }}
                   onSubmit={submitComment}
                   onCopy={copyFeedback}
                   onSave={saveFeedback}

@@ -904,6 +904,8 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
         overflow: "scroll",
         enableGutterUtility: !props.navigationOnly,
         enableLineSelection: true,
+        // File navigation scrolls the viewer; its visible controls must stay clickable.
+        pointerEventsOnScroll: true,
         stickyHeaders: true,
         lineHoverHighlight: "both",
         expansionLineCount: 30,
@@ -1108,23 +1110,6 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
                 Retry
               </button>
             )}
-            {!props.navigationOnly && selectedLine?.id === item.id && (
-              <button
-                className="small-button"
-                aria-label="Comment on selected line"
-                onClick={() =>
-                  onComment(
-                    item.id,
-                    selectedLine.line,
-                    snapshot.comparison.view === "changes"
-                      ? (selectedLine.side ?? "new")
-                      : undefined,
-                  )
-                }
-              >
-                Comment on line {selectedLine.line}
-              </button>
-            )}
             {!props.navigationOnly && (
               <button
                 className="icon-button"
@@ -1160,7 +1145,6 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
         onReviewed,
         onLoad,
         snapshot.comparison.view,
-        selectedLine,
         props.navigationOnly,
       ],
     );
@@ -1246,6 +1230,11 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
             <button
               className="gutter-comment"
               aria-label="Comment on line"
+              onPointerDownCapture={(event) => {
+                // Keep the renderer's line-selection gesture from moving the
+                // slotted + button before its click can open the composer.
+                event.stopPropagation();
+              }}
               onClick={() => {
                 const hovered = getHoveredLine();
                 if (

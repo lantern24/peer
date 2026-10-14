@@ -830,6 +830,9 @@ p {
   color: var(--add);
 }
 .gutter-comment {
+  /* Keep the slotted control above the renderer's line-number text. */
+  position: relative;
+  z-index: 2;
   background: var(--accent);
   color: var(--accent-fg);
   border-radius: 3px;

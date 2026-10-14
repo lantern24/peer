@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import {
   Copy,
   Download,
@@ -24,6 +24,7 @@ type Props = {
   queue: ReviewQueue;
   view: string;
   draft?: Draft;
+  focusRequest: number;
   busy: boolean;
   onDraft: (draft?: Draft) => void;
   onSubmit: () => void;
@@ -40,6 +41,7 @@ export function Feedback({
   queue,
   view,
   draft,
+  focusRequest,
   busy,
   onDraft,
   onSubmit,
@@ -53,6 +55,10 @@ export function Feedback({
 }: Props) {
   const [editing, setEditing] = useState<string | null>(null);
   const [body, setBody] = useState("");
+  const composer = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => {
+    composer.current?.focus();
+  }, [focusRequest]);
   return (
     <aside id="right-sidebar" className="feedback-panel">
       <div className="feedback-title">
@@ -126,7 +132,7 @@ export function Feedback({
                 : "File comment"}
             </div>
             <textarea
-              autoFocus
+              ref={composer}
               aria-label="Comment text"
               placeholder="Suggest a change or ask a question…"
               value={draft.body}
