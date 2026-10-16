@@ -1605,6 +1605,38 @@ mark.search-match {
   color: var(--accent-fg);
   border-radius: 6px;
 }
+.diagnostic-report {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+.diagnostic-report p {
+  color: var(--muted);
+  line-height: 1.5;
+}
+.diagnostic-report textarea {
+  width: 100%;
+  min-height: 220px;
+  resize: vertical;
+  font-family: monospace;
+  font-size: 11px;
+}
+.diagnostic-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.fatal {
+  height: 100vh;
+  overflow: auto;
+}
+.fatal details {
+  margin-top: 24px;
+}
+.fatal summary {
+  cursor: pointer;
+  margin-bottom: 16px;
+}
 @media (max-width: 1150px) {
   .repository-switcher {
     width: var(--file-sidebar-width, 210px);

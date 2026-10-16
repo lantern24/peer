@@ -1,3 +1,12 @@
+export type RuntimeDiagnostics = {
+  appVersion: string;
+  os: string;
+  osVersion: string | null;
+  arch: string;
+  webviewVersion: string | null;
+  errors: string[];
+};
+
 export type View = "code" | "changes";
 export type Comparison = {
   view: View;

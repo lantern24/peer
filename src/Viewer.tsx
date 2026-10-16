@@ -47,6 +47,13 @@ import {
   type SourceRange,
 } from "./navigation";
 export type { LoadedFile } from "./loaded-file";
+import {
+  diagnosticFile,
+  recordDiagnostic,
+  recordDiagnosticError,
+  registerDiagnosticContext,
+  type DiagnosticFields,
+} from "./diagnostics";
 export type ViewerHandle = {
   jump: (id: string, line?: number, side?: "old" | "new") => void;
   scrollTop: () => number;
@@ -149,6 +156,91 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
     } | null>(null);
     const pendingFindScroll = useRef<SourceMatch | null>(null);
     const searchedNodes = useRef(new WeakSet<HTMLElement>());
+    const lastDiagnosticRender = useRef<{
+      snapshotId: string;
+      id: string;
+      version: number | undefined;
+    } | null>(null);
+    const diagnosticState = useCallback((): DiagnosticFields => {
+      const current = refs.current;
+      const instance = viewer.current?.getInstance();
+      const container = instance?.getContainerElement();
+      const viewport = container?.getBoundingClientRect();
+      const rendered = instance?.getRenderedItems() ?? [];
+      const host = rendered.find(
+        (item) => item.id === current.selected,
+      )?.element;
+      const lines = host?.shadowRoot?.querySelectorAll<HTMLElement>(
+        "[data-line][data-line-type]",
+      );
+      let sampledLines = 0;
+      let visibleLines = 0;
+      let firstLine: DiagnosticFields = {};
+      if (lines && viewport) {
+        for (const line of lines) {
+          if (sampledLines >= 100) break;
+          const range = document.createRange();
+          range.selectNodeContents(line);
+          const rect = range.getBoundingClientRect();
+          const style = getComputedStyle(line);
+          if (sampledLines++ === 0)
+            firstLine = {
+              firstLineWidth: rect.width,
+              firstLineHeight: rect.height,
+              firstLineDisplay: style.display,
+              firstLineVisibility: style.visibility,
+              firstLineOpacity: style.opacity,
+              firstLineColor: style.color,
+            };
+          if (
+            rect.width > 0 &&
+            rect.height > 0 &&
+            rect.bottom > viewport.top &&
+            rect.top < viewport.bottom &&
+            rect.right > viewport.left &&
+            rect.left < viewport.right &&
+            style.visibility === "visible" &&
+            style.opacity !== "0" &&
+            style.display !== "none"
+          )
+            visibleLines++;
+        }
+      }
+      return {
+        ...diagnosticFile(current.snapshot, current.selected),
+        rendererPresent: !!instance,
+        renderedItems: rendered.length,
+        selectedMounted: !!host,
+        shadowRoot: !!host?.shadowRoot,
+        sourceLines: lines?.length ?? 0,
+        sampledLines,
+        visibleLines,
+        loaded: !!(current.selected && current.loaded[current.selected]),
+        collapsed: !!(current.selected && collapsed.has(current.selected)),
+        viewportWidth: viewport?.width,
+        viewportHeight: viewport?.height,
+        scrollTop: instance?.getScrollTop(),
+        ...firstLine,
+        ...pool?.getStats(),
+      };
+    }, [pool, collapsed]);
+    useEffect(
+      () => registerDiagnosticContext("viewer", diagnosticState),
+      [diagnosticState],
+    );
+    const selectedContent = selected ? loaded[selected]?.content : undefined;
+    useEffect(() => {
+      // One delayed sample per selected-file transition; never measure each
+      // scroll/render frame. Report export also samples the current state.
+      const timer = setTimeout(() => {
+        try {
+          recordDiagnostic("viewer.probe", diagnosticState());
+        } catch (error) {
+          recordDiagnosticError("viewer.probe.error", error);
+        }
+      }, 1000);
+      return () => clearTimeout(timer);
+    }, [snapshot, selected, selectedContent, diagnosticState]);
 
     const positionAt = useCallback(
       (
@@ -256,6 +348,10 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
             composed = local.getComposedRanges({ shadowRoots: roots });
           } catch (error) {
             if (!(error instanceof TypeError)) throw error;
+            recordDiagnostic(
+              "selection.legacy",
+              diagnosticFile(refs.current.snapshot, refs.current.selected),
+            );
             // Older WebKit accepts individual ShadowRoots and rejects the
             // options object. Preserve its selection when capturing history.
             const legacy = local as Selection & {
@@ -399,6 +495,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
         })
         .catch((error) => {
           if (active) onError(String(error));
+          recordDiagnosticError("highlight.options.error", error);
         });
       return () => {
         active = false;
@@ -408,6 +505,12 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
     const navigate = useCallback(
       (id: string, line?: number, side?: "old" | "new") => {
         const handle = viewer.current;
+        recordDiagnostic("viewer.jump", {
+          ...diagnosticFile(refs.current.snapshot, id),
+          line,
+          side,
+          handlePresent: !!handle,
+        });
         if (!handle) return;
         handle.scrollTo({
           type: "item",
@@ -970,6 +1073,26 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
           const props = refs.current;
           const id = context.item.id;
           node.dataset.navigationId = id;
+          const last = lastDiagnosticRender.current;
+          if (
+            id === props.selected &&
+            (last?.snapshotId !== props.snapshot.id ||
+              last.id !== id ||
+              last.version !== context.item.version)
+          ) {
+            lastDiagnosticRender.current = {
+              snapshotId: props.snapshot.id,
+              id,
+              version: context.item.version,
+            };
+            recordDiagnostic("viewer.rendered", {
+              ...diagnosticFile(props.snapshot, id),
+              type: context.type,
+              phase,
+              loaded: !!props.loaded[id],
+              collapsed: context.item.collapsed ?? false,
+            });
+          }
           if (targetRange.current?.id === id) queueMicrotask(highlightTarget);
           if (
             context.type === "diff" &&

@@ -24,6 +24,11 @@ import {
   type SymbolPosition,
   type ViewportState,
 } from "./navigation";
+import {
+  diagnosticFile,
+  recordDiagnostic,
+  recordDiagnosticError,
+} from "./diagnostics";
 
 export function useNavigation({
   snapshot,
@@ -112,14 +117,28 @@ export function useNavigation({
 
   const capture = useCallback((): HistoryEntry => {
     const value = current.current;
-    return {
-      selected: value.selected,
-      navigationSide: value.navigationSide,
-      page: value.page,
-      viewport: viewer.current?.capture() ?? null,
-      results: value.results,
-      resultsVisible: value.resultsVisible,
-    };
+    const target = diagnosticFile(value.snapshot, value.selected);
+    recordDiagnostic("navigation.capture.start", target);
+    try {
+      const entry = {
+        selected: value.selected,
+        navigationSide: value.navigationSide,
+        page: value.page,
+        viewport: viewer.current?.capture() ?? null,
+        results: value.results,
+        resultsVisible: value.resultsVisible,
+      };
+      recordDiagnostic("navigation.capture.complete", {
+        ...target,
+        hasViewport: entry.viewport !== null,
+        hasSelection: !!entry.viewport?.selection,
+        sourcePage: entry.page !== null,
+      });
+      return entry;
+    } catch (error) {
+      recordDiagnosticError("navigation.capture.error", error, target);
+      throw error;
+    }
   }, [viewer]);
   const remember = useCallback((entry: HistoryEntry) => {
     history.current.push(entry);
@@ -248,16 +267,24 @@ export function useNavigation({
     async (id: string, line?: number, side?: "old" | "new") => {
       const active = current.current.snapshot;
       if (!active) return;
+      const target = { ...diagnosticFile(active, id), line, side };
+      recordDiagnostic("navigation.request", target);
       const origin = capture();
       cancel();
       const attempt = generation.current;
+      let stage = "load";
       try {
+        recordDiagnostic("navigation.load.start", target);
         await current.current.loadFile(id);
+        recordDiagnostic("navigation.load.complete", target);
         if (
           attempt !== generation.current ||
           current.current.snapshot?.id !== active.id
-        )
+        ) {
+          recordDiagnostic("navigation.superseded", target);
           return;
+        }
+        stage = "activate";
         remember(origin);
         setPage(null);
         setFile(null);
@@ -265,7 +292,9 @@ export function useNavigation({
         current.current.activateFile(id);
         pending.current = { id, line, side };
         setEpoch((value) => value + 1);
+        recordDiagnostic("navigation.activated", target);
       } catch (error) {
+        recordDiagnosticError(`navigation.${stage}.error`, error, target);
         if (attempt === generation.current) setStatus(navigationError(error));
       }
     },
@@ -288,6 +317,8 @@ export function useNavigation({
     const entry = history.current.peek();
     const active = current.current.snapshot;
     if (!entry || !active) return;
+    const target = diagnosticFile(active, entry.selected);
+    recordDiagnostic("navigation.back.start", target);
     cancel();
     const attempt = generation.current;
     try {
@@ -312,7 +343,9 @@ export function useNavigation({
       if (entry.selected) current.current.activateFile(entry.selected);
       pending.current = entry.viewport ? { state: entry.viewport } : null;
       setEpoch((value) => value + 1);
+      recordDiagnostic("navigation.back.complete", target);
     } catch (error) {
+      recordDiagnosticError("navigation.back.error", error, target);
       if (attempt === generation.current) setStatus(navigationError(error));
     }
   }, [cancel, read, setNavigationSide]);

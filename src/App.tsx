@@ -55,9 +55,28 @@ import { NavigationSource } from "./NavigationSource";
 import { NavigationResults } from "./NavigationResults";
 import type { ViewportState } from "./navigation";
 import { refreshedViewport } from "./refresh";
+import {
+  diagnosticFile,
+  recordDiagnostic,
+  recordDiagnosticError,
+  registerDiagnosticContext,
+} from "./diagnostics";
 
 const poolOptions = {
-  workerFactory: () => new HighlightWorker(),
+  workerFactory: () => {
+    recordDiagnostic("highlight.worker.start");
+    const worker = new HighlightWorker();
+    worker.addEventListener("error", (event) =>
+      recordDiagnosticError(
+        "highlight.worker.error",
+        event.error ?? event.message,
+      ),
+    );
+    worker.addEventListener("messageerror", () =>
+      recordDiagnostic("highlight.worker.messageerror"),
+    );
+    return worker;
+  },
   poolSize: 1,
   totalASTLRUCacheSize: 12,
 };
@@ -147,11 +166,10 @@ export default function App() {
     started: boolean;
   } | null>(null);
 
-  const reportError = useCallback(
-    (error: unknown) =>
-      setError(error instanceof Error ? error.message : String(error)),
-    [],
-  );
+  const reportError = useCallback((error: unknown) => {
+    recordDiagnosticError("app.error", error);
+    setError(error instanceof Error ? error.message : String(error));
+  }, []);
   const notify = useCallback((text: string) => {
     setMessage(text);
   }, []);
@@ -193,6 +211,12 @@ export default function App() {
       previousPath?: string,
     ) => {
       const request = ++opening.current;
+      recordDiagnostic("repository.open.request", {
+        request,
+        view: comparison?.view,
+        mode: comparison?.mode,
+        relocating: previousPath !== undefined,
+      });
       const previous = snapshotRef.current;
       const oldPath = previous?.files.find(
         (f) => f.id === selectionRef.current,
@@ -223,9 +247,15 @@ export default function App() {
       try {
         await prefWrites.current;
         await api.savePreferences(preferencesRef.current);
+        recordDiagnostic("repository.open.start", { request });
         const next = previousPath
           ? await api.relocate(previousPath, path)
           : await api.open(path, comparison);
+        recordDiagnostic("repository.open.complete", {
+          request,
+          ...diagnosticFile(next, null),
+          files: next.files.length,
+        });
         const [nextQueue, nextBranches] = await Promise.all([
           api.queue(next.id),
           api.branches(next.id),
@@ -298,6 +328,7 @@ export default function App() {
         preferencesRef.current = nextPreferences;
         setPreferences(nextPreferences);
       } catch (e) {
+        recordDiagnosticError("repository.open.error", e, { request });
         if (previousPath) throw e;
         if (request === opening.current) reportError(e);
       } finally {
@@ -309,10 +340,12 @@ export default function App() {
 
   useEffect(() => {
     let active = true;
+    recordDiagnostic("bootstrap.start");
     api
       .bootstrap()
       .then((data) => {
         if (!active) return;
+        recordDiagnostic("bootstrap.complete");
         preferencesRef.current = data.preferences;
         setPreferences(data.preferences);
         setImported(data.themes);
@@ -346,23 +379,41 @@ export default function App() {
         active.comparison.view === "code"
           ? codeCache.current.get(id)
           : loadedRef.current[id];
-      if (cached && (!cached.content.deferred || !force)) return cached;
+      const target = diagnosticFile(active, id);
+      if (cached && (!cached.content.deferred || !force)) {
+        recordDiagnostic("file.cache.hit", target);
+        return cached;
+      }
       const entry = active.files.find((f) => f.id === id);
       if (!entry) throw new Error("File not found");
       const key = `${active.id}:${id}:${force}`;
       const pending = requests.current.get(key);
-      if (pending) return pending;
+      if (pending) {
+        recordDiagnostic("file.read.shared", target);
+        return pending;
+      }
       const work = limit(async () => {
         if (snapshotRef.current?.id !== active.id)
           throw new Error("Repository view changed");
+        let stage = "read";
         try {
+          recordDiagnostic("file.read.start", { ...target, force });
           const content = await api.read(active.id, id, force);
-          const diff =
+          recordDiagnostic("file.read.complete", {
+            ...target,
+            bytes: content.size,
+            kind: content.kind,
+            deferred: content.deferred,
+          });
+          const needsDiff =
             active.comparison.view === "changes" &&
             !content.deferred &&
-            (content.oldContent !== null || content.newContent !== null)
-              ? await parseDiff(content)
-              : undefined;
+            (content.oldContent !== null || content.newContent !== null);
+          stage = "parse";
+          if (needsDiff) recordDiagnostic("file.parse.start", target);
+          const diff = needsDiff ? await parseDiff(content) : undefined;
+          if (needsDiff) recordDiagnostic("file.parse.complete", target);
+          stage = "retain";
           const value = retainFile(content, diff);
           if (snapshotRef.current?.id === active.id) {
             loadedRef.current =
@@ -382,6 +433,7 @@ export default function App() {
           }
           return value;
         } catch (e) {
+          recordDiagnosticError(`file.${stage}.error`, e, target);
           if (snapshotRef.current?.id === active.id)
             setErrors((prev) => ({ ...prev, [id]: String(e) }));
           throw e;
@@ -568,6 +620,31 @@ export default function App() {
     navigationSide,
     setNavigationSide,
   });
+  useEffect(
+    () =>
+      registerDiagnosticContext("app", () => ({
+        ...diagnosticFile(snapshotRef.current, selectionRef.current),
+        ready,
+        busy,
+        fileCount: snapshotRef.current?.files.length ?? 0,
+        loadedFiles: Object.keys(loadedRef.current).length,
+        pendingReads: requests.current.size,
+        fileErrors: Object.keys(errors).length,
+        sourcePage: navigation.page !== null,
+        diffLayout: preferences.diffLayout,
+        codeFontSize: preferences.codeFontSize,
+        showWhitespace: preferences.showWhitespace,
+      })),
+    [
+      ready,
+      busy,
+      errors,
+      navigation.page,
+      preferences.diffLayout,
+      preferences.codeFontSize,
+      preferences.showWhitespace,
+    ],
+  );
   const selectFile = navigation.review;
   const focusFind = useCallback(() => {
     document

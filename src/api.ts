@@ -13,6 +13,7 @@ import type {
   NavigationRequest,
   NavigationResult,
   NavigationFile,
+  RuntimeDiagnostics,
 } from "./types";
 
 export const api = {
@@ -33,6 +34,9 @@ export const api = {
   cancelNavigation: (requestId: string) =>
     invoke<void>("cancel_navigation", { requestId }),
   bootstrap: () => invoke<Bootstrap>("bootstrap"),
+  diagnosticRuntime: () => invoke<RuntimeDiagnostics>("diagnostic_runtime"),
+  saveDiagnosticReport: (path: string, text: string) =>
+    invoke<void>("save_diagnostic_report", { path, text }),
   savePreferences: (preferences: Preferences) =>
     invoke<void>("save_preferences", { preferences }),
   open: (path: string, comparison: Comparison | null) =>

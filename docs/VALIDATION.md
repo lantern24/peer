@@ -2,6 +2,22 @@
 
 Reference machine: Apple M2, macOS 26.5.2 (25F84 / Darwin 25.5.0). The native app uses WKWebView with a configured 1440 × 940 window. The test-only configuration keeps its window above other windows to avoid occlusion-related rendering pauses; production windows retain normal behavior. Development tools: Rust 1.88 and Node.js 26.7.
 
+## User-exportable diagnostics — 2026-10-15 JST
+
+Settings → Diagnostics previews and exports a memory-only report containing native runtime versions, WebView capabilities, bounded navigation/read/parse/render/error events, and current viewer/worker state. The fatal-error screen exposes the same exporter. File identifiers are session-local numbers; source contents and review comments are not deliberately collected. Error messages and stacks are explicitly warned as potentially sensitive.
+
+`npm test` passed all 31 frontend/harness tests. The five diagnostic regressions cover event ordering/eviction, UTF-8 byte limits, capture-time serialization, numbered file references, and preserving a report when runtime/context collection fails without copying arbitrary rejection payloads. `cargo test -p peer --locked diagnostics::tests` passed three native writer tests covering Unicode, exact byte limits, oversized-report rejection without overwriting an existing file, and write failures. `cargo test -p peer-core --locked` passed 45 regular tests, with the two opt-in real-server suites ignored. TypeScript/Vite production and native desktop-test builds passed.
+
+All three permanent native diagnostic scenarios passed: Code/Changes navigation with source/comment privacy sentinels and byte-for-byte preview export; cancellation and an actual filesystem write failure preserving the preview; and a deleted, uncached file retaining both native-read and navigation errors, followed by clearing the log. Tests supply only the OS picker's chosen path/cancellation at the IPC transport boundary; report writing uses the actual native command and filesystem.
+
+A temporary native WKWebView smoke forced an exception during navigation history capture, verified the capture failure and unhandled rejection in the exported report, then forced a React fatal error and exported successfully from the fallback screen. Both surfaces were visually inspected. The report identified macOS `26.5.2` and WebKit `21624.2.5.11.8`, distinct from the frozen user-agent value `605.1.15`.
+
+The same three native diagnostic scenarios and forced-failure smoke also passed with the retained Playwright WebKit framework reporting `618.1.5+`, loaded into the actual Tauri app on the same macOS host. Its report correctly recorded the older engine and unsupported `light-dark()` CSS capability. The fatal-error export surface was visually inspected on that engine as well. Temporary smoke sources and the launcher were removed.
+
+The broader system-WebKit run (`PEER_PERFORMANCE_MODE=report npm run test:desktop`) passed 40 scenarios and failed nine in `review.spec.ts`: eight timed out in the comment helper's animation-frame wait, and one timed out following diff scrolling. All nine passed unchanged when run against WebKit `618.1.5+`. The system-engine diagnostic smoke reported a hidden/unfocused document, whereas the older engine reported visible/focused; this is runtime/environment evidence, not proof of the timeout cause. The broad run also recorded a 38 ms scrolling p95 against the 33 ms target and an 83 ms warm-navigation p95 against the 100 ms target. No fully passing system-WebKit suite or enforced performance pass is claimed.
+
+These diagnostics do not fix or establish the cause of the reported macOS 14.3 file-rendering failure. No macOS 14.3 or newly published release is claimed.
+
 ## tcsh/csh login-shell compatibility — 2026-10-14 JST
 
 PR #10's review identified that tcsh/csh cannot combine `-l` with the other shell flags. PATH discovery now selects login mode through a leading `-` in the executable's `argv[0]`, uses `-i`, and sends the framed PATH command through stdin. Avoiding `-c` also preserves tcsh's interactive startup state: the expanded regression caught that `-ic` leaves `prompt` unset and skips prompt-guarded PATH setup.

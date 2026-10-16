@@ -764,7 +764,9 @@ describe("Peer in the native webview", () => {
     await $('[aria-label="Search themes"]').setValue("Dracula");
     await click("button=Viewer");
     await endpointKey("End");
-    await expect(active()).toHaveText("Git");
+    const lastTab = $('[role="tablist"] [role="tab"]:last-child');
+    await expect(lastTab).toHaveAttribute("aria-selected", "true");
+    await expect(lastTab).toBeFocused();
     await browser.keys("ArrowRight");
     await expect(active()).toHaveText("Appearance");
     await expect($('[aria-label="Search themes"]')).toHaveValue("Dracula");
