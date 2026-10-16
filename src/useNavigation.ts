@@ -58,7 +58,10 @@ export function useNavigation({
   const [epoch, setEpoch] = useState(0);
   const [mountEpoch, setMountEpoch] = useState(0);
   const [historyLength, setHistoryLength] = useState(0);
+  const [forwardLength, setForwardLength] = useState(0);
   const history = useRef(new NavigationHistory());
+  const future = useRef(new NavigationHistory());
+  const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
   const cache = useRef(new SourceCache<NavigationFile>(8 * 1024 * 1024, 8));
   const pending = useRef<{
     state?: ViewportState;
@@ -99,12 +102,14 @@ export function useNavigation({
   useEffect(() => {
     cancel();
     history.current.clear();
+    future.current.clear();
     cache.current.clear();
     setPage(null);
     setFile(null);
     setResults(null);
     setResultsVisible(false);
     setHistoryLength(0);
+    setForwardLength(0);
     pending.current = null;
   }, [snapshot?.id, cancel]);
   useEffect(
@@ -143,6 +148,8 @@ export function useNavigation({
   const remember = useCallback((entry: HistoryEntry) => {
     history.current.push(entry);
     setHistoryLength(history.current.length);
+    future.current.clear();
+    setForwardLength(0);
   }, []);
   const read = useCallback(
     async (
@@ -313,42 +320,52 @@ export function useNavigation({
     },
     [capture, cancel, remember, review, viewer],
   );
-  const back = useCallback(async () => {
-    const entry = history.current.peek();
-    const active = current.current.snapshot;
-    if (!entry || !active) return;
-    const target = diagnosticFile(active, entry.selected);
-    recordDiagnostic("navigation.back.start", target);
-    cancel();
-    const attempt = generation.current;
-    try {
-      const source = entry.page
-        ? await read(active.id, entry.page.side, entry.page.documentId)
-        : null;
-      if (!entry.page && entry.selected)
-        await current.current.loadFile(entry.selected);
-      if (
-        attempt !== generation.current ||
-        current.current.snapshot?.id !== active.id
-      )
-        return;
-      history.current.pop();
-      setHistoryLength(history.current.length);
-      setMountEpoch((value) => value + 1);
-      setPage(entry.page);
-      setNavigationSide(entry.navigationSide);
-      setFile(source);
-      setResults(entry.results);
-      setResultsVisible(entry.resultsVisible);
-      if (entry.selected) current.current.activateFile(entry.selected);
-      pending.current = entry.viewport ? { state: entry.viewport } : null;
-      setEpoch((value) => value + 1);
-      recordDiagnostic("navigation.back.complete", target);
-    } catch (error) {
-      recordDiagnosticError("navigation.back.error", error, target);
-      if (attempt === generation.current) setStatus(navigationError(error));
-    }
-  }, [cancel, read, setNavigationSide]);
+  const traverse = useCallback(
+    async (direction: "back" | "forward") => {
+      const from = direction === "back" ? history.current : future.current;
+      const to = direction === "back" ? future.current : history.current;
+      const entry = from.peek();
+      const active = current.current.snapshot;
+      if (!entry || !active) return;
+      const target = diagnosticFile(active, entry.selected);
+      recordDiagnostic(`navigation.${direction}.start`, target);
+      const origin = capture();
+      cancel();
+      const attempt = generation.current;
+      try {
+        const source = entry.page
+          ? await read(active.id, entry.page.side, entry.page.documentId)
+          : null;
+        if (!entry.page && entry.selected)
+          await current.current.loadFile(entry.selected);
+        if (
+          attempt !== generation.current ||
+          current.current.snapshot?.id !== active.id
+        )
+          return;
+        from.pop();
+        to.push(origin);
+        setHistoryLength(history.current.length);
+        setForwardLength(future.current.length);
+        setMountEpoch((value) => value + 1);
+        setPage(entry.page);
+        setNavigationSide(entry.navigationSide);
+        setFile(source);
+        setResults(entry.results);
+        setResultsVisible(entry.resultsVisible);
+        if (entry.selected) current.current.activateFile(entry.selected);
+        pending.current = entry.viewport ? { state: entry.viewport } : null;
+        setEpoch((value) => value + 1);
+        recordDiagnostic(`navigation.${direction}.complete`, target);
+      } catch (error) {
+        recordDiagnosticError(`navigation.${direction}.error`, error, target);
+        if (attempt === generation.current) setStatus(navigationError(error));
+      }
+    },
+    [capture, cancel, read, setNavigationSide],
+  );
+  const back = useCallback(() => traverse("back"), [traverse]);
+  const forward = useCallback(() => traverse("forward"), [traverse]);
   const loadSource = useCallback(async () => {
     const value = current.current;
     if (!value.snapshot || !value.page) return;
@@ -384,7 +401,33 @@ export function useNavigation({
   }, [epoch, file, page, selected, viewer]);
   useEffect(() => {
     const keys = (event: KeyboardEvent) => {
-      if (isTyping(event) || event.altKey || event.repeat) return;
+      if (
+        event.defaultPrevented ||
+        event.isComposing ||
+        isTyping(event) ||
+        event.repeat
+      )
+        return;
+      const historyModifier =
+        !event.shiftKey &&
+        !event.ctrlKey &&
+        (isMac
+          ? event.metaKey && !event.altKey
+          : event.altKey && !event.metaKey);
+      if (historyModifier) {
+        const goBack = isMac
+          ? event.key === "[" || event.code === "BracketLeft"
+          : event.key === "ArrowLeft";
+        const goForward = isMac
+          ? event.key === "]" || event.code === "BracketRight"
+          : event.key === "ArrowRight";
+        if (goBack || goForward) {
+          event.preventDefault();
+          void (goBack ? back() : forward());
+          return;
+        }
+      }
+      if (event.altKey) return;
       if (event.key === "F12" && !event.ctrlKey && !event.metaKey) {
         const position = viewer.current?.sourcePosition();
         if (position) {
@@ -403,7 +446,7 @@ export function useNavigation({
     };
     window.addEventListener("keydown", keys);
     return () => window.removeEventListener("keydown", keys);
-  }, [navigate, back, viewer]);
+  }, [navigate, back, forward, isMac, viewer]);
   return {
     page,
     file,
@@ -413,8 +456,12 @@ export function useNavigation({
     status,
     mountEpoch,
     historyLength,
+    forwardLength,
+    backShortcut: isMac ? "⌘+[" : "Alt+←",
+    forwardShortcut: isMac ? "⌘+]" : "Alt+→",
     cancel,
     back,
+    forward,
     navigate,
     review,
     jump,
