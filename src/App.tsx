@@ -121,10 +121,12 @@ export default function App() {
   const [branches, setBranches] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [copying, setCopying] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [settings, setSettings] = useState<SettingsTab | null>(null);
   const [feedback, setFeedback] = useState(true);
+  const [deleteAfterCopy, setDeleteAfterCopy] = useState(true);
   const [drafts, setDrafts] = useState<Record<string, Draft | undefined>>({});
   const [commentFocusRequest, setCommentFocusRequest] = useState(0);
   const [quickOpen, setQuickOpen] = useState(false);
@@ -743,7 +745,7 @@ export default function App() {
   );
   const submitComment = useCallback(async () => {
     const s = snapshotRef.current;
-    if (!s) return;
+    if (!s || saving || copying) return;
     const draft = drafts[s.queueId];
     if (!draft?.body.trim()) return;
     ++commentRequest.current;
@@ -780,7 +782,7 @@ export default function App() {
     } finally {
       setSaving(false);
     }
-  }, [drafts, loadFile, reloadQueue, notify, reportError]);
+  }, [drafts, loadFile, reloadQueue, notify, reportError, saving, copying]);
   const markReviewed = useCallback(
     async (id: string, checked: boolean) => {
       const s = snapshotRef.current;
@@ -811,17 +813,29 @@ export default function App() {
     [notify, navigation.review],
   );
   const copyFeedback = async () => {
-    if (!snapshot) return;
+    if (!snapshot || saving || copying) return;
+    setCopying(true);
     try {
       const json = await api.export(snapshot.id);
       try {
         await writeText(json);
-        notify("Comments copied");
       } catch {
         setExportText(json);
+        return;
       }
+      if (deleteAfterCopy) {
+        // Keep comments added while the clipboard write was in flight.
+        for (const comment of queue.comments)
+          await api.deleteComments(snapshot.queueId, comment.id);
+        await reloadQueue();
+      }
+      notify(
+        deleteAfterCopy ? "Comments copied and deleted" : "Comments copied",
+      );
     } catch (e) {
       reportError(e);
+    } finally {
+      setCopying(false);
     }
   };
   const saveFeedback = async () => {
@@ -1557,6 +1571,7 @@ export default function App() {
                   draft={drafts[snapshot.queueId]}
                   focusRequest={commentFocusRequest}
                   busy={saving}
+                  copying={copying}
                   onDraft={(draft) => {
                     if (!draft) ++commentRequest.current;
                     setDrafts((prev) => ({
@@ -1566,6 +1581,8 @@ export default function App() {
                   }}
                   onSubmit={submitComment}
                   onCopy={copyFeedback}
+                  deleteAfterCopy={deleteAfterCopy}
+                  onDeleteAfterCopyChange={setDeleteAfterCopy}
                   onSave={saveFeedback}
                   onClear={clearFeedback}
                   onDelete={(id) => {
@@ -1575,12 +1592,19 @@ export default function App() {
                       .catch(reportError);
                   }}
                   onEdit={async (id, body) => {
+                    if (saving || copying)
+                      throw new Error(
+                        "Wait for the current feedback operation to finish.",
+                      );
+                    setSaving(true);
                     try {
                       await api.editComment(snapshot.queueId, id, body);
                       await reloadQueue();
                     } catch (e) {
                       reportError(e);
                       throw e;
+                    } finally {
+                      setSaving(false);
                     }
                   }}
                   onJump={jumpToComment}

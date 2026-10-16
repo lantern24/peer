@@ -127,7 +127,11 @@ The toolbar Refresh button and Refresh Repository menu command reload immediatel
 ]
 ```
 
-File comments omit `line`. Line numbers are one-based; diff comments on the old side additionally include `"side": "old"`. Outdated comments are included with `"outdated": true`, retaining their original location. Copying does not clear feedback. Save JSON and the selectable clipboard fallback use the same concise format.
+File comments omit `line`. Line numbers are one-based; diff comments on the old side additionally include `"side": "old"`. Outdated comments are included with `"outdated": true`, retaining their original location.
+
+**Delete comments after copying**, below the Copy comments button, is on by default. After a successful clipboard copy, the copied comments are deleted from the active queue; drafts and Reviewed state are kept. Turn it off to keep comments after copying. The toggle keeps its setting while switching views or hiding Feedback during the session. If clipboard access fails, comments are kept and a selectable JSON fallback is shown. Save JSON uses the same concise format without deleting comments.
+
+Save or cancel an open comment edit before copying. Copy is also unavailable while a comment save is pending. During copying, comment changes are disabled until export, clipboard writing, and deletion finish; hiding and reopening Feedback does not bypass these guards. Clipboard failures release the controls without deleting comments.
 
 ## Code navigation
 
