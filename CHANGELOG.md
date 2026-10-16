@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.2.0](https://github.com/lantern24/peer/compare/v0.1.3...v0.2.0) (2026-10-16)
+
+
+### Features
+
+* **diagnostics:** Add exportable runtime reports ([#15](https://github.com/lantern24/peer/issues/15)) ([5380ef7](https://github.com/lantern24/peer/commit/5380ef72c8f6536fba269da51266e613f1efbdbc))
+* **feedback:** Add delete-after-copy toggle ([#18](https://github.com/lantern24/peer/issues/18)) ([b1f7246](https://github.com/lantern24/peer/commit/b1f7246f0c0faeecb1af73859c9b2eff7e119096))
+* **navigation:** Add cross-platform Back and Forward shortcuts ([#17](https://github.com/lantern24/peer/issues/17)) ([23f5df1](https://github.com/lantern24/peer/commit/23f5df1d5e6da94ce07c8f45f1bd582bb47c2859))
+
 ## [0.1.3](https://github.com/lantern24/peer/compare/v0.1.2...v0.1.3) (2026-10-14)
 
 
