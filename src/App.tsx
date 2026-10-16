@@ -125,6 +125,7 @@ export default function App() {
   const [message, setMessage] = useState("");
   const [settings, setSettings] = useState<SettingsTab | null>(null);
   const [feedback, setFeedback] = useState(true);
+  const [deleteAfterCopy, setDeleteAfterCopy] = useState(true);
   const [drafts, setDrafts] = useState<Record<string, Draft | undefined>>({});
   const [commentFocusRequest, setCommentFocusRequest] = useState(0);
   const [quickOpen, setQuickOpen] = useState(false);
@@ -816,10 +817,19 @@ export default function App() {
       const json = await api.export(snapshot.id);
       try {
         await writeText(json);
-        notify("Comments copied");
       } catch {
         setExportText(json);
+        return;
       }
+      if (deleteAfterCopy) {
+        // Keep comments added while the clipboard write was in flight.
+        for (const comment of queue.comments)
+          await api.deleteComments(snapshot.queueId, comment.id);
+        await reloadQueue();
+      }
+      notify(
+        deleteAfterCopy ? "Comments copied and deleted" : "Comments copied",
+      );
     } catch (e) {
       reportError(e);
     }
@@ -1566,6 +1576,8 @@ export default function App() {
                   }}
                   onSubmit={submitComment}
                   onCopy={copyFeedback}
+                  deleteAfterCopy={deleteAfterCopy}
+                  onDeleteAfterCopyChange={setDeleteAfterCopy}
                   onSave={saveFeedback}
                   onClear={clearFeedback}
                   onDelete={(id) => {

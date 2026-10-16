@@ -1,7 +1,12 @@
 import { browser, $, expect } from "@wdio/globals";
 import type * as Tauri from "@tauri-apps/api";
 import type { Bootstrap, Preferences, ReviewQueue } from "../../src/types";
-type TauriWindow = Window & { __TAURI__: typeof Tauri };
+type TauriWindow = Window & {
+  __TAURI__: typeof Tauri;
+  __TAURI_INTERNALS__: {
+    convertFileSrc: typeof Tauri.core.convertFileSrc;
+  };
+};
 type BenchmarkWindow = Window & {
   __benchmark: {
     frames: number[];
@@ -354,7 +359,11 @@ describe("Peer in the native webview", () => {
     await expect($('[aria-label="Comment text"]')).toHaveValue(
       "Draft survives theme switching",
     );
-    await click('[aria-label="Discard draft"]');
+    await expect($(".feedback-copy-option input")).toBeSelected();
+    await click(".feedback-copy-option input");
+    await click('[aria-label="Close feedback"]');
+    await click(".feedback-toggle");
+    await expect($(".feedback-copy-option input")).not.toBeSelected();
     await click("button=Copy comments");
     await expect($(".toast")).toHaveText(expect.stringContaining("copied"));
     const copied = await browser.execute(async () =>
@@ -368,7 +377,72 @@ describe("Peer in the native webview", () => {
         comment: "Please explain the value change.",
       },
     ]);
+    await expect($(".comment-card p")).toHaveText(
+      "Please explain the value change.",
+    );
     await browser.saveScreenshot(resolve("test-results/dark-feedback.png"));
+    await click(".feedback-copy-option input");
+    await click("button=Copy comments");
+    await expect($(".comment-card")).not.toExist();
+    await expect($(".feedback-title .count")).toHaveText("0");
+    await expect($('[aria-label="Comment text"]')).toHaveValue(
+      "Draft survives theme switching",
+    );
+    const saved: { queues: Record<string, ReviewQueue> } = JSON.parse(
+      readFileSync(join(process.env.PEER_DATA_DIR!, "state.json"), "utf8"),
+    );
+    expect(
+      Object.values(saved.queues).flatMap((queue) => queue.comments),
+    ).toEqual([]);
+  });
+
+  it("keeps comments when copying falls back after clipboard failure", async () => {
+    await addFileComment("Keep this comment if copying fails.");
+    await expect($(".feedback-copy-option input")).toBeSelected();
+    await browser.execute(() => {
+      const appWindow = window as unknown as TauriWindow;
+      const clipboardUrl = appWindow.__TAURI_INTERNALS__.convertFileSrc(
+        "plugin:clipboard-manager|write_text",
+        "ipc",
+      );
+      const original = window.fetch;
+      window.fetch = (input, init) => {
+        const url = input instanceof Request ? input.url : String(input);
+        if (url === clipboardUrl) {
+          window.fetch = original;
+          return Promise.resolve(
+            new Response(JSON.stringify("Clipboard unavailable"), {
+              headers: {
+                "Content-Type": "application/json",
+                "Tauri-Response": "error",
+              },
+            }),
+          );
+        }
+        return original(input, init);
+      };
+    });
+    await click("button=Copy comments");
+    const fallback = $('[aria-label="Exported feedback JSON"]');
+    await fallback.waitForExist();
+    expect(JSON.parse(await fallback.getValue())).toEqual([
+      {
+        file: "src/module-000.ts",
+        comment: "Keep this comment if copying fails.",
+      },
+    ]);
+    await click('[aria-label="Close dialog"]');
+    await expect($(".comment-card p")).toHaveText(
+      "Keep this comment if copying fails.",
+    );
+    const saved: { queues: Record<string, ReviewQueue> } = JSON.parse(
+      readFileSync(join(process.env.PEER_DATA_DIR!, "state.json"), "utf8"),
+    );
+    expect(
+      Object.values(saved.queues).flatMap((queue) =>
+        queue.comments.map((comment) => comment.body),
+      ),
+    ).toEqual(["Keep this comment if copying fails."]);
   });
 
   it("preserves whitespace text while showing markers and switches layouts", async () => {
@@ -1044,6 +1118,11 @@ describe("Peer in the native webview", () => {
           comment: "Can we name this value?",
         },
       ]),
+    );
+    await expect($(".comment-card")).not.toExist();
+    await expect($(".feedback-title .count")).toHaveText("0");
+    await expect($(".statusbar")).toHaveText(
+      expect.stringContaining("1 reviewed"),
     );
     await click('[aria-label="Close search"]');
     await clickInPlace(

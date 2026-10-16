@@ -29,6 +29,8 @@ type Props = {
   onDraft: (draft?: Draft) => void;
   onSubmit: () => void;
   onCopy: () => void;
+  deleteAfterCopy: boolean;
+  onDeleteAfterCopyChange: (enabled: boolean) => void;
   onSave: () => void;
   onClear: () => void;
   onDelete: (id: string) => void;
@@ -46,6 +48,8 @@ export function Feedback({
   onDraft,
   onSubmit,
   onCopy,
+  deleteAfterCopy,
+  onDeleteAfterCopyChange,
   onSave,
   onClear,
   onDelete,
@@ -105,6 +109,14 @@ export function Feedback({
           <Trash2 size={14} />
         </button>
       </div>
+      <label className="feedback-copy-option">
+        <input
+          type="checkbox"
+          checked={deleteAfterCopy}
+          onChange={(e) => onDeleteAfterCopyChange(e.target.checked)}
+        />
+        Delete comments after copying
+      </label>
       <div className="feedback-list">
         {draft && (
           <form

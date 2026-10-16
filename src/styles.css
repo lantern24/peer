@@ -991,12 +991,21 @@ p {
   display: flex;
   align-items: center;
   gap: 7px;
-  padding: 14px 15px;
-  border-bottom: 1px solid var(--border);
+  padding: 14px 15px 8px;
 }
 .feedback-actions .primary-button {
   flex: 1;
   padding: 7px 10px;
+}
+.feedback-copy-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 15px 14px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
 }
 .feedback-list {
   flex: 1;
