@@ -7,6 +7,13 @@ type TauriWindow = Window & {
     convertFileSrc: typeof Tauri.core.convertFileSrc;
   };
 };
+type FeedbackRequestWindow = TauriWindow & {
+  __feedbackRequest?: {
+    command: string | null;
+    release?: () => void;
+    restore: () => void;
+  };
+};
 type BenchmarkWindow = Window & {
   __benchmark: {
     frames: number[];
@@ -337,6 +344,159 @@ describe("Peer in the native webview", () => {
     await browser.saveScreenshot(resolve("test-results/changes.png"));
   });
 
+  async function holdFeedbackRequests(commands: string[]) {
+    await browser.execute((commands) => {
+      const appWindow = window as unknown as FeedbackRequestWindow;
+      const urls = new Map(
+        commands.map((command) => [
+          appWindow.__TAURI_INTERNALS__.convertFileSrc(command, "ipc"),
+          command,
+        ]),
+      );
+      const original = window.fetch;
+      const pending: NonNullable<FeedbackRequestWindow["__feedbackRequest"]> = {
+        command: null,
+        restore: () => {
+          window.fetch = original;
+          pending.release?.();
+          delete appWindow.__feedbackRequest;
+        },
+      };
+      appWindow.__feedbackRequest = pending;
+      // Delay transport only; each released request still reaches native IPC.
+      window.fetch = (input, init) => {
+        const url = input instanceof Request ? input.url : String(input);
+        const command = urls.get(url);
+        if (!command) return original(input, init);
+        urls.delete(url);
+        pending.command = command;
+        return new Promise<Response>((resolve) => {
+          pending.release = () => {
+            pending.command = null;
+            pending.release = undefined;
+            resolve(original(input, init));
+          };
+        });
+      };
+    }, commands);
+  }
+
+  async function waitForFeedbackRequest(command: string) {
+    await browser.waitUntil(() =>
+      browser.execute(
+        (command) =>
+          (window as unknown as FeedbackRequestWindow).__feedbackRequest
+            ?.command === command,
+        command,
+      ),
+    );
+  }
+
+  async function releaseFeedbackRequest() {
+    await browser.execute(() =>
+      (
+        window as unknown as FeedbackRequestWindow
+      ).__feedbackRequest?.release?.(),
+    );
+  }
+
+  async function restoreFeedbackRequests() {
+    await browser.execute(() =>
+      (window as unknown as FeedbackRequestWindow).__feedbackRequest?.restore(),
+    );
+  }
+
+  it("blocks copying during an open edit and an in-flight comment save", async () => {
+    await addFileComment("Original feedback");
+    await click('.comment-card button[aria-label="Edit comment"]');
+    await $('textarea[aria-label="Edit comment"]').setValue("Revised feedback");
+    await expect($("button=Copy comments")).toBeDisabled();
+    await holdFeedbackRequests(["update_comment", "get_queue"]);
+    try {
+      await browser.execute(() => {
+        document
+          .querySelector<HTMLFormElement>(".comment-card form")
+          ?.requestSubmit();
+      });
+      await waitForFeedbackRequest("update_comment");
+      await expect($("button=Copy comments")).toBeDisabled();
+      await expect($("button=Cancel")).toBeDisabled();
+      await click('[aria-label="Close feedback"]');
+      await click(".feedback-toggle");
+      await expect($("button=Copy comments")).toBeDisabled();
+      await expect(
+        $('.comment-card button[aria-label="Edit comment"]'),
+      ).toBeDisabled();
+      await releaseFeedbackRequest();
+      await waitForFeedbackRequest("get_queue");
+      await expect($("button=Copy comments")).toBeDisabled();
+      await releaseFeedbackRequest();
+      await expect($(".comment-card p")).toHaveText("Revised feedback");
+      await click("button=Copy comments");
+      await expect($(".comment-card")).not.toExist();
+      const copied = await browser.execute(() =>
+        (window as unknown as TauriWindow).__TAURI__.core.invoke<string>(
+          "plugin:clipboard-manager|read_text",
+        ),
+      );
+      expect(JSON.parse(copied)).toEqual([
+        { file: "src/module-000.ts", comment: "Revised feedback" },
+      ]);
+    } finally {
+      await restoreFeedbackRequests();
+    }
+  });
+
+  it("blocks comment edits throughout export, clipboard writing, and cleanup", async () => {
+    await addFileComment("Copy this exact feedback");
+    const commands = [
+      "export_queue",
+      "plugin:clipboard-manager|write_text",
+      "delete_comments",
+    ];
+    await holdFeedbackRequests(commands);
+    try {
+      await click("button=Copy comments");
+      for (const command of commands) {
+        await waitForFeedbackRequest(command);
+        await expect($(".feedback-actions .primary-button")).toBeDisabled();
+        await expect(
+          $('.comment-card button[aria-label="Edit comment"]'),
+        ).toBeDisabled();
+        await click('[aria-label="Close feedback"]');
+        await click(".feedback-toggle");
+        await expect($(".feedback-actions .primary-button")).toBeDisabled();
+        await expect(
+          $('.comment-card button[aria-label="Edit comment"]'),
+        ).toBeDisabled();
+        await expect($(".comment-card p")).toHaveText(
+          "Copy this exact feedback",
+        );
+        if (command === "plugin:clipboard-manager|write_text")
+          await browser.saveScreenshot(
+            resolve("test-results/copy-edit-guard.png"),
+          );
+        await releaseFeedbackRequest();
+      }
+      await expect($(".comment-card")).not.toExist();
+      const copied = await browser.execute(() =>
+        (window as unknown as TauriWindow).__TAURI__.core.invoke<string>(
+          "plugin:clipboard-manager|read_text",
+        ),
+      );
+      expect(JSON.parse(copied)).toEqual([
+        { file: "src/module-000.ts", comment: "Copy this exact feedback" },
+      ]);
+      await addFileComment("Editing is available after copying");
+      await click('.comment-card button[aria-label="Edit comment"]');
+      await expect($('textarea[aria-label="Edit comment"]')).toHaveValue(
+        "Editing is available after copying",
+      );
+    } finally {
+      await restoreFeedbackRequests();
+    }
+  });
+
   it("saves feedback, keeps a draft through theme changes, and copies concise feedback", async () => {
     await addFileComment("Please explain the value change.");
     await click('[aria-label="Comment on file src/module-000.ts"]');
@@ -435,6 +595,10 @@ describe("Peer in the native webview", () => {
     await expect($(".comment-card p")).toHaveText(
       "Keep this comment if copying fails.",
     );
+    await expect($("button=Copy comments")).toBeEnabled();
+    await expect(
+      $('.comment-card button[aria-label="Edit comment"]'),
+    ).toBeEnabled();
     const saved: { queues: Record<string, ReviewQueue> } = JSON.parse(
       readFileSync(join(process.env.PEER_DATA_DIR!, "state.json"), "utf8"),
     );

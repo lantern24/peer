@@ -26,6 +26,7 @@ type Props = {
   draft?: Draft;
   focusRequest: number;
   busy: boolean;
+  copying: boolean;
   onDraft: (draft?: Draft) => void;
   onSubmit: () => void;
   onCopy: () => void;
@@ -45,6 +46,7 @@ export function Feedback({
   draft,
   focusRequest,
   busy,
+  copying,
   onDraft,
   onSubmit,
   onCopy,
@@ -85,10 +87,17 @@ export function Feedback({
         <button
           className="primary-button"
           onClick={onCopy}
-          disabled={!queue.comments.length}
+          disabled={
+            !queue.comments.length || busy || copying || editing !== null
+          }
+          title={
+            editing !== null
+              ? "Save or cancel the edit before copying"
+              : undefined
+          }
         >
           <Copy size={14} />
-          Copy comments
+          {copying ? "Copying…" : "Copy comments"}
         </button>
         <button
           className="icon-button bordered"
@@ -104,7 +113,7 @@ export function Feedback({
           title="Clear this queue"
           aria-label="Clear all comments"
           onClick={onClear}
-          disabled={!queue.comments.length}
+          disabled={!queue.comments.length || busy || copying}
         >
           <Trash2 size={14} />
         </button>
@@ -113,6 +122,7 @@ export function Feedback({
         <input
           type="checkbox"
           checked={deleteAfterCopy}
+          disabled={copying}
           onChange={(e) => onDeleteAfterCopyChange(e.target.checked)}
         />
         Delete comments after copying
@@ -158,7 +168,7 @@ export function Feedback({
             />
             <button
               className="primary-button"
-              disabled={!draft.body.trim() || busy}
+              disabled={!draft.body.trim() || busy || copying}
             >
               <Send size={13} />
               {busy ? "Saving…" : "Add comment"}
@@ -204,6 +214,7 @@ export function Feedback({
               <form
                 onSubmit={async (e) => {
                   e.preventDefault();
+                  if (busy || copying) return;
                   try {
                     await onEdit(comment.id, body);
                     setEditing(null);
@@ -215,15 +226,20 @@ export function Feedback({
                 <textarea
                   aria-label="Edit comment"
                   value={body}
+                  disabled={busy || copying}
                   onChange={(e) => setBody(e.target.value)}
                 />
                 <div className="row">
-                  <button className="small-button" disabled={!body.trim()}>
-                    Save
+                  <button
+                    className="small-button"
+                    disabled={!body.trim() || busy || copying}
+                  >
+                    {busy ? "Saving…" : "Save"}
                   </button>
                   <button
                     type="button"
                     className="text-button"
+                    disabled={busy || copying}
                     onClick={() => setEditing(null)}
                   >
                     Cancel
@@ -245,6 +261,7 @@ export function Feedback({
               <button
                 className="icon-button"
                 aria-label="Edit comment"
+                disabled={busy || copying}
                 onClick={() => {
                   setEditing(comment.id);
                   setBody(comment.body);
@@ -255,6 +272,7 @@ export function Feedback({
               <button
                 className="icon-button"
                 aria-label="Delete comment"
+                disabled={busy || copying}
                 onClick={() => onDelete(comment.id)}
               >
                 <Trash2 size={12} />

@@ -121,6 +121,7 @@ export default function App() {
   const [branches, setBranches] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [copying, setCopying] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [settings, setSettings] = useState<SettingsTab | null>(null);
@@ -744,7 +745,7 @@ export default function App() {
   );
   const submitComment = useCallback(async () => {
     const s = snapshotRef.current;
-    if (!s) return;
+    if (!s || saving || copying) return;
     const draft = drafts[s.queueId];
     if (!draft?.body.trim()) return;
     ++commentRequest.current;
@@ -781,7 +782,7 @@ export default function App() {
     } finally {
       setSaving(false);
     }
-  }, [drafts, loadFile, reloadQueue, notify, reportError]);
+  }, [drafts, loadFile, reloadQueue, notify, reportError, saving, copying]);
   const markReviewed = useCallback(
     async (id: string, checked: boolean) => {
       const s = snapshotRef.current;
@@ -812,7 +813,8 @@ export default function App() {
     [notify, navigation.review],
   );
   const copyFeedback = async () => {
-    if (!snapshot) return;
+    if (!snapshot || saving || copying) return;
+    setCopying(true);
     try {
       const json = await api.export(snapshot.id);
       try {
@@ -832,6 +834,8 @@ export default function App() {
       );
     } catch (e) {
       reportError(e);
+    } finally {
+      setCopying(false);
     }
   };
   const saveFeedback = async () => {
@@ -1567,6 +1571,7 @@ export default function App() {
                   draft={drafts[snapshot.queueId]}
                   focusRequest={commentFocusRequest}
                   busy={saving}
+                  copying={copying}
                   onDraft={(draft) => {
                     if (!draft) ++commentRequest.current;
                     setDrafts((prev) => ({
@@ -1587,12 +1592,19 @@ export default function App() {
                       .catch(reportError);
                   }}
                   onEdit={async (id, body) => {
+                    if (saving || copying)
+                      throw new Error(
+                        "Wait for the current feedback operation to finish.",
+                      );
+                    setSaving(true);
                     try {
                       await api.editComment(snapshot.queueId, id, body);
                       await reloadQueue();
                     } catch (e) {
                       reportError(e);
                       throw e;
+                    } finally {
+                      setSaving(false);
                     }
                   }}
                   onJump={jumpToComment}

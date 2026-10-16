@@ -131,6 +131,8 @@ File comments omit `line`. Line numbers are one-based; diff comments on the old 
 
 **Delete comments after copying**, below the Copy comments button, is on by default. After a successful clipboard copy, the copied comments are deleted from the active queue; drafts and Reviewed state are kept. Turn it off to keep comments after copying. The toggle keeps its setting while switching views or hiding Feedback during the session. If clipboard access fails, comments are kept and a selectable JSON fallback is shown. Save JSON uses the same concise format without deleting comments.
 
+Save or cancel an open comment edit before copying. Copy is also unavailable while a comment save is pending. During copying, comment changes are disabled until export, clipboard writing, and deletion finish; hiding and reopening Feedback does not bypass these guards. Clipboard failures release the controls without deleting comments.
+
 ## Code navigation
 
 Click a symbol or select its text, then press **F12** to open its definition. **⌘-click** on macOS, **Ctrl-click** on other platforms, and the source context menu do the same. At a definition, F12 opens a references panel; **Shift-F12** or **Find References** requests references directly. Multiple definitions appear as selectable results.
