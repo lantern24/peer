@@ -2,7 +2,12 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
 import App from "./App";
+import { DiagnosticReport } from "./DiagnosticReport";
+import { installDiagnostics, recordDiagnosticError } from "./diagnostics";
 import "./styles.css";
+
+const uninstallDiagnostics = installDiagnostics();
+if (import.meta.hot) import.meta.hot.dispose(uninstallDiagnostics);
 
 if (import.meta.env.VITE_DESKTOP_TEST === "1") {
   // A static import would install the test driver in production builds too.
@@ -24,6 +29,11 @@ class ErrorBoundary extends React.Component<
   static getDerivedStateFromError(error: Error) {
     return { error: error.message };
   }
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
+    recordDiagnosticError("react.fatal", error, {
+      componentStack: info.componentStack ?? null,
+    });
+  }
   render() {
     return this.state.error ? (
       <main className="fatal">
@@ -31,6 +41,10 @@ class ErrorBoundary extends React.Component<
         <p>{this.state.error}</p>
         <button onClick={() => location.reload()}>Reload Peer</button>
         <p>Saved feedback is kept on disk.</p>
+        <details>
+          <summary>Inspect and export diagnostic report</summary>
+          <DiagnosticReport />
+        </details>
       </main>
     ) : (
       this.props.children

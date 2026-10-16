@@ -172,6 +172,18 @@ Import a self-contained VS Code `.json` or `.jsonc` theme. Validated definitions
 
 External `include` and token-color file references are rejected. Semantic tokens, icon themes, VSIX installation, and online theme installation are outside v1. Native menus and file dialogs follow the OS appearance. Theme attribution and license texts are retained in `licenses/` and bundled as resources.
 
+## Diagnostic reports
+
+If a file click leaves the viewer blank or another UI operation fails:
+
+1. Reproduce the problem, then open **Settings → Diagnostics** without restarting Peer.
+2. Click **Refresh report** and inspect the text preview.
+3. Choose **Save report…** to export `peer-diagnostics.txt`, then share it manually with the issue report. Include the steps you took and whether you were using Code or Changes.
+
+Reports contain the Peer version, OS version and architecture, native WebView version (the WebKit build on macOS), browser capabilities, current viewer/worker state, and timestamped navigation, file-read, parsing, rendering, and error events. The fatal-error screen also offers **Inspect and export diagnostic report**; export before choosing Reload Peer.
+
+Diagnostics are recorded automatically in memory only, bounded to the latest 300 events and 256 KiB of event text. Restarting/reloading Peer clears them; **Clear recorded events** clears them without restarting. Nothing is uploaded or written to a report file until you choose to save. File identifiers use session-local numbers rather than names or paths, and source contents and review comments are not deliberately collected. **Error messages and stacks can contain paths or other sensitive text: inspect the preview before sharing, and redact the saved text file if necessary.**
+
 ## Architecture and storage
 
 `crates/repo-core` implements Git discovery, comparisons, snapshot validation, comment/review services, export, preferences, and theme validation. It has no dependency on Tauri. `src-tauri` exposes typed commands and native menus/dialogs/clipboard. `src/Viewer.tsx` adapts `@pierre/diffs` with virtualized file/line rendering, a diff worker, and a Shiki worker pool. Syntax grammars and themes are packaged locally.

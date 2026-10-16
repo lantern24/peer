@@ -1,3 +1,5 @@
+mod diagnostics;
+
 use peer_core::navigation::{NavigationError, NavigationFile, NavigationRequest, NavigationResult};
 use peer_core::{types::*, Inspector};
 use tauri::{Emitter, Manager, State};
@@ -190,6 +192,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             bootstrap,
+            diagnostics::diagnostic_runtime,
+            diagnostics::save_diagnostic_report,
             navigate_symbol,
             read_navigation_file,
             cancel_navigation,

@@ -12,12 +12,14 @@ import type { Preferences } from "./types";
 import { themeVariables, type Theme } from "./themes";
 import { Modal } from "./Modal";
 import { NavigationSettings } from "./NavigationSettings";
+import { DiagnosticReport } from "./DiagnosticReport";
 
 const tabs = [
   { id: "appearance", label: "Appearance" },
   { id: "viewer", label: "Viewer" },
   { id: "navigation", label: "Code navigation" },
   { id: "git", label: "Git" },
+  { id: "diagnostics", label: "Diagnostics" },
 ] as const;
 export type SettingsTab = (typeof tabs)[number]["id"];
 
@@ -354,6 +356,9 @@ export function Settings({
           Leave empty to use your installed Git. Changes take effect on the next
           repository refresh.
         </p>
+      </section>
+      <section {...panel("diagnostics")}>
+        {tab === "diagnostics" && <DiagnosticReport />}
       </section>
     </Modal>
   );

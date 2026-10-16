@@ -24,6 +24,7 @@ export const config = {
           "./navigation.spec.ts",
           "./repositories.spec.ts",
           "./history.spec.ts",
+          "./diagnostics.spec.ts",
         ]),
   ],
   maxInstances: 1,
