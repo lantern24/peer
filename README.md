@@ -147,6 +147,22 @@ Destinations open as complete, read-only source files, including files that are 
 
 Use **⌘+[** / **⌘+]** on macOS or **Alt+←** / **Alt+→** on Windows and Linux to go Back / Forward, matching Chrome. The toolbar Back and Forward buttons do the same; **Ctrl+-** remains available for Back. Navigation restores the file, source selection, scroll position, and diff expansion state. These shortcuts leave text fields and open dialogs untouched.
 
+**Mouse navigation and driver compatibility**
+
+Mouse **Back / Forward** controls use the same view history, including when the pointer is over source text. Support depends on the events a mouse or its driver sends, not its brand or model:
+
+- **Shared handling on macOS, Windows, and Linux:** [src/useNavigation.ts](src/useNavigation.ts) handles standard mouse Back / Forward button events and `BrowserBack` / `BrowserForward` key events delivered to the WebView. Mouse buttons mapped to the keyboard shortcuts above use the existing keyboard navigation path.
+- **Additional native handling on macOS:** [src-tauri/src/macos_navigation.rs](src-tauri/src/macos_navigation.rs) handles discrete AppKit horizontal swipe events (`NSEventTypeSwipe`), such as Logi Options+’s Back / Forward gesture assignments. This module and its AppKit dependencies compile only on macOS. Ordinary scrolling is unchanged.
+- **Windows and Linux boundary:** there are no additional native mouse-driver command handlers for these platforms. A proprietary or OS-level command that does not reach the WebView as a supported mouse/key event will not trigger Peer’s view history.
+
+**Not supported: fluid macOS page swipes.** Scroll-based “Swipe between pages” gestures—such as two-finger trackpad or one-finger Magic Mouse swipes—are not interpreted as Peer history navigation. They arrive as scroll-wheel streams rather than discrete swipe events and remain ordinary scrolling; Peer does not track them as page gestures.
+
+Mouse side buttons, `BrowserBack` / `BrowserForward` keys, and native swipes do not navigate behind an open dialog or leave the Peer document at the ends of history. Browser navigation keys are also consumed without traversal while typing; keyboard-shortcut mappings retain the text-field and dialog guards described above.
+
+**If a custom mapping does not work:** configure the assignment for Peer, not just for your browser. Start with Back / Forward; if the driver does not deliver a supported event, map the buttons to **⌘+[** / **⌘+]** on macOS or **Alt+←** / **Alt+→** on Windows/Linux.
+
+**Verification limits:** desktop regressions run in the macOS WebView using synthesized mouse/key events and native AppKit discrete-swipe injection. Windows/Linux keyboard mappings are emulated in that WebView, not tested on those operating systems. Mouse navigation has not been verified on actual Windows/Linux runtimes or physical mouse/driver combinations; these checks do not establish universal hardware compatibility.
+
 History includes file selection, quick-open, search results, line jumps, comment jumps, and symbol jumps. Navigating somewhere new after going Back clears Forward history. History holds up to 100 entries for the current comparison and resets on refresh, comparison changes (including switching Code/Changes), or opening another repository. Source pages retain the original feedback queue and drafts; comments and Reviewed actions remain in the review view. Find and Go to Line operate on the displayed source page.
 
 Configure servers in **Settings → Code navigation**. Go, TypeScript/JavaScript, Python, and Rust have presets. Servers and their toolchains must be installed locally; Peer does not install them or fetch dependencies. Suggested setup for the tested presets:

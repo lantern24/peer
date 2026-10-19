@@ -1,4 +1,5 @@
 import { browser, $, expect } from "@wdio/globals";
+import type { invoke } from "@tauri-apps/api/core";
 import type { Preferences } from "../../src/types";
 import { mkdtempSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -63,6 +64,37 @@ async function historyKey(
     },
     direction,
     options,
+    selector,
+  );
+}
+async function mouseButton(button: number, selector?: string) {
+  return browser.execute(
+    async (button, selector) => {
+      const target = selector
+        ? document.querySelector(selector)
+        : document
+            .querySelector("diffs-container")
+            ?.shadowRoot?.querySelector("[data-code]");
+      if (!target) throw new Error("Missing mouse target");
+      const prevented: boolean[] = [];
+      for (const type of ["mousedown", "mouseup", "auxclick"]) {
+        const event = new MouseEvent(type, {
+          button,
+          buttons: type === "mousedown" ? [1, 4, 2, 8, 16][button] : 0,
+          bubbles: true,
+          composed: true,
+          cancelable: true,
+        });
+        // Navigation can remount the viewer after mouseup.
+        (target.isConnected ? target : document.body).dispatchEvent(event);
+        prevented.push(event.defaultPrevented);
+        await new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+        );
+      }
+      return prevented;
+    },
+    button,
     selector,
   );
 }
@@ -695,6 +727,284 @@ describe("Version-aware navigation", () => {
       await selectedFile("defs.ts", "version B");
     });
   }
+
+  it("traverses view history once per mouse side-button click", async () => {
+    await switchView("Code");
+    const selectedFile = async (path: string, text: string) => {
+      await expect($(`.tree-file[title="${path}"]`)).toHaveAttribute(
+        "aria-current",
+        "true",
+      );
+      await sourceContains(text);
+    };
+    await $('.tree-file[title="call.ts"]').click();
+    await selectedFile("call.ts", "asdf(); // B");
+    await $('[aria-label="Refresh repository"]').click();
+    await $('[aria-label="Refresh repository"]').waitForEnabled();
+    for (const button of [3, 4])
+      expect(await mouseButton(button)).toEqual([true, true, true]);
+    await selectedFile("call.ts", "asdf(); // B");
+    await expect($('[aria-label="Go back"]')).not.toBeEnabled();
+    await expect($('[aria-label="Go forward"]')).not.toBeEnabled();
+
+    await $('.tree-file[title="defs.ts"]').click();
+    await selectedFile("defs.ts", "version B");
+    await clickInPlace('[aria-label="Collapse defs.ts"]');
+    await $('.tree-file[title="keep.ts"]').click();
+    await selectedFile("keep.ts", "export function keep");
+    expect(await mouseButton(3)).toEqual([true, true, true]);
+    await expect($('.tree-file[title="defs.ts"]')).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+    await expect($('[aria-label="Expand defs.ts"]')).toExist();
+    // Both history directions are available; ordinary buttons and dialogs win.
+    for (const button of [0, 1, 2])
+      expect(await mouseButton(button, ".code-view")).toEqual([
+        false,
+        false,
+        false,
+      ]);
+    await key("p", true);
+    await $('[aria-label="Quick open file"]').waitForDisplayed();
+    for (const button of [3, 4])
+      expect(await mouseButton(button, "dialog[open]")).toEqual([
+        true,
+        true,
+        true,
+      ]);
+    await expect($('.tree-file[title="defs.ts"]')).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+    await browser.keys("Escape");
+    await $('[aria-label="Quick open file"]').waitForExist({ reverse: true });
+    await mouseButton(3, ".code-view");
+    await selectedFile("call.ts", "asdf(); // B");
+    await expect($('[aria-label="Go back"]')).not.toBeEnabled();
+    await mouseButton(4);
+    await expect($('.tree-file[title="defs.ts"]')).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+    await expect($('[aria-label="Expand defs.ts"]')).toExist();
+    await clickInPlace('[aria-label="Expand defs.ts"]');
+    await sourceContains("version B");
+    await browser.saveScreenshot(
+      resolve("test-results/navigation-mouse-forward.png"),
+    );
+    await mouseButton(4);
+    await selectedFile("keep.ts", "export function keep");
+    await expect($('[aria-label="Go forward"]')).not.toBeEnabled();
+    await mouseButton(3);
+    await selectedFile("defs.ts", "version B");
+    await $('.tree-file[title="call.ts"]').click();
+    await selectedFile("call.ts", "asdf(); // B");
+    await expect($('[aria-label="Go forward"]')).not.toBeEnabled();
+    await mouseButton(4);
+    await selectedFile("call.ts", "asdf(); // B");
+  });
+
+  it("navigates with native macOS mouse-driver swipe gestures", async function () {
+    if (process.platform !== "darwin") this.skip();
+    type TestWindow = Window & {
+      __TAURI__: {
+        core: { invoke: typeof invoke };
+      };
+    };
+    const swipe = (deltaX: 1 | -1, windowless = false) =>
+      browser.execute(
+        async (deltaX, windowless) => {
+          // tauri.test.conf.json enables this bridge; the command exists only in
+          // desktop-test builds and dispatches through NSApplication, not JS emit.
+          const testWindow = window as TestWindow;
+          await testWindow.__TAURI__.core.invoke("test_swipe", {
+            back: deltaX === 1,
+            windowless,
+          });
+          await new Promise<void>((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+          );
+        },
+        deltaX,
+        windowless,
+      );
+    const selectedFile = async (path: string, text: string) => {
+      await expect($(`.tree-file[title="${path}"]`)).toHaveAttribute(
+        "aria-current",
+        "true",
+      );
+      await sourceContains(text);
+    };
+    await switchView("Code");
+    await $('.tree-file[title="call.ts"]').click();
+    await selectedFile("call.ts", "asdf(); // B");
+    await $('[aria-label="Refresh repository"]').click();
+    await $('[aria-label="Refresh repository"]').waitForEnabled();
+    await swipe(1);
+    await swipe(-1);
+    await selectedFile("call.ts", "asdf(); // B");
+    await expect($('[aria-label="Go back"]')).not.toBeEnabled();
+    await expect($('[aria-label="Go forward"]')).not.toBeEnabled();
+
+    await $('.tree-file[title="defs.ts"]').click();
+    await selectedFile("defs.ts", "version B");
+    await clickInPlace('[aria-label="Collapse defs.ts"]');
+    await $('.tree-file[title="keep.ts"]').click();
+    await selectedFile("keep.ts", "export function keep");
+    await swipe(1);
+    await expect($('.tree-file[title="defs.ts"]')).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+    await expect($('[aria-label="Expand defs.ts"]')).toExist();
+    // Driver-created NSEvents may omit the window; route the app gesture to Peer.
+    await swipe(1, true);
+    await selectedFile("call.ts", "asdf(); // B");
+    await expect($('[aria-label="Go back"]')).not.toBeEnabled();
+    await swipe(-1, true);
+    await expect($('.tree-file[title="defs.ts"]')).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+    await expect($('[aria-label="Expand defs.ts"]')).toExist();
+    await key("p", true);
+    await $('[aria-label="Quick open file"]').waitForDisplayed();
+    await swipe(1);
+    await swipe(-1);
+    await expect($('.tree-file[title="defs.ts"]')).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+    await expect($('[aria-label="Expand defs.ts"]')).toExist();
+    await browser.keys("Escape");
+    await $('[aria-label="Quick open file"]').waitForExist({ reverse: true });
+    await swipe(-1);
+    await selectedFile("keep.ts", "export function keep");
+    await expect($('[aria-label="Go forward"]')).not.toBeEnabled();
+    await browser.saveScreenshot(
+      resolve("test-results/navigation-native-swipe-forward.png"),
+    );
+    await $('[aria-label="Refresh repository"]').click();
+    await $('[aria-label="Refresh repository"]').waitForEnabled();
+    await swipe(1);
+    await selectedFile("keep.ts", "export function keep");
+    await expect($('[aria-label="Go back"]')).not.toBeEnabled();
+  });
+
+  it("accepts mouse drivers mapped to browser navigation keys without leaving Peer", async () => {
+    const browserKey = (
+      direction: "back" | "forward",
+      options: KeyboardEventInit = {},
+      selector?: string,
+      alreadyCancelled = false,
+    ) =>
+      browser.execute(
+        async (direction, options, selector, alreadyCancelled) => {
+          const event = new KeyboardEvent("keydown", {
+            key: direction === "back" ? "BrowserBack" : "BrowserForward",
+            bubbles: true,
+            composed: true,
+            cancelable: true,
+            ...options,
+          });
+          const target = selector ? document.querySelector(selector) : window;
+          if (!target) throw new Error(`Missing keyboard target: ${selector}`);
+          if (alreadyCancelled) event.preventDefault();
+          target.dispatchEvent(event);
+          await new Promise<void>((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+          );
+          return event.defaultPrevented;
+        },
+        direction,
+        options,
+        selector,
+        alreadyCancelled,
+      );
+    const selectedFile = async (path: string, text: string) => {
+      await expect($(`.tree-file[title="${path}"]`)).toHaveAttribute(
+        "aria-current",
+        "true",
+      );
+      await sourceContains(text);
+    };
+    const staysPut = async (
+      options: KeyboardEventInit = {},
+      selector?: string,
+      alreadyCancelled = false,
+    ) => {
+      for (const direction of ["back", "forward"] as const) {
+        expect(
+          await browserKey(direction, options, selector, alreadyCancelled),
+        ).toBe(true);
+        await selectedFile("defs.ts", "version B");
+        await expect($('[aria-label="Go back"]')).toBeEnabled();
+        await expect($('[aria-label="Go forward"]')).toBeEnabled();
+      }
+    };
+    await switchView("Code");
+    await $('.tree-file[title="call.ts"]').click();
+    await selectedFile("call.ts", "asdf(); // B");
+    await $('[aria-label="Refresh repository"]').click();
+    await $('[aria-label="Refresh repository"]').waitForEnabled();
+    await $('.tree-file[title="defs.ts"]').click();
+    await selectedFile("defs.ts", "version B");
+    await $('.tree-file[title="keep.ts"]').click();
+    await selectedFile("keep.ts", "export function keep");
+    expect(await browserKey("back")).toBe(true);
+    await selectedFile("defs.ts", "version B");
+
+    // Every blocked event is cancelled without changing either history direction.
+    await $('button[aria-label="Find in file"]').click();
+    await staysPut({}, 'input[aria-label="Find in file"]');
+    await $('[aria-label="Close search"]').click();
+    await browser.execute(() => {
+      const editable = document.createElement("div");
+      editable.id = "browser-key-editable";
+      editable.contentEditable = "true";
+      editable.textContent = "Editable keyboard target";
+      document.body.append(editable);
+      editable.focus();
+    });
+    try {
+      await staysPut({}, "#browser-key-editable");
+    } finally {
+      await browser.execute(() =>
+        document.querySelector("#browser-key-editable")?.remove(),
+      );
+    }
+    await key("p", true);
+    await $('[aria-label="Quick open file"]').waitForDisplayed();
+    await staysPut();
+    await browser.keys("Escape");
+    await $('[aria-label="Quick open file"]').waitForExist({ reverse: true });
+    for (const options of [
+      { repeat: true },
+      { isComposing: true },
+      { altKey: true },
+      { ctrlKey: true },
+      { metaKey: true },
+      { shiftKey: true },
+    ]) {
+      await staysPut(options);
+    }
+    await staysPut({}, undefined, true);
+
+    // Traversal still reaches the original entries and boundaries, not new history.
+    expect(await browserKey("back")).toBe(true);
+    await selectedFile("call.ts", "asdf(); // B");
+    await expect($('[aria-label="Go back"]')).not.toBeEnabled();
+    expect(await browserKey("back")).toBe(true);
+    await selectedFile("call.ts", "asdf(); // B");
+    expect(await browserKey("forward")).toBe(true);
+    await selectedFile("defs.ts", "version B");
+    expect(await browserKey("forward")).toBe(true);
+    await selectedFile("keep.ts", "export function keep");
+    await expect($('[aria-label="Go forward"]')).not.toBeEnabled();
+    expect(await browserKey("forward")).toBe(true);
+    await selectedFile("keep.ts", "export function keep");
+  });
 
   it("uses native history keys and restores the forward viewport", async () => {
     await switchView("Code");
