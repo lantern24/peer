@@ -827,10 +827,15 @@ async fn snapshot_rejects_source_and_inventory_changes_during_initial_capture() 
 fn attribute_git(directory: &Path) -> std::path::PathBuf {
     use std::os::unix::fs::PermissionsExt;
     let directory = directory.canonicalize().unwrap();
+    let wrapper = directory.join("git");
+    // Linked worktrees share this executable, including probes still exiting
+    // after cancellation. Rewriting it can make Linux exec fail with ETXTBSY.
+    if wrapper.exists() {
+        return wrapper;
+    }
     fs::create_dir_all(directory.join("home")).unwrap();
     fs::create_dir_all(directory.join("xdg")).unwrap();
     let quote = |path: &Path| format!("'{}'", path.to_str().unwrap().replace('\'', "'\\''"));
-    let wrapper = directory.join("git");
     let real_git = repository::discover_git(None);
     fs::write(
         &wrapper,

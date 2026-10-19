@@ -411,12 +411,18 @@ fn resolve_attribute_path(
     let mut components = path.components();
     while let Some(component) = components.next() {
         match component {
+            Component::Prefix(_) | Component::RootDir => {
+                // A Windows verbatim drive prefix is not a filesystem path
+                // until its root and subsequent components are attached.
+                resolved.push(component.as_os_str());
+                continue;
+            }
             Component::CurDir => continue,
             Component::ParentDir => {
                 resolved.pop();
                 continue;
             }
-            _ => resolved.push(component.as_os_str()),
+            Component::Normal(name) => resolved.push(name),
         }
         match fs::symlink_metadata(&resolved) {
             Ok(metadata) if metadata.file_type().is_symlink() => {
