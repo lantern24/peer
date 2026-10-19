@@ -2,6 +2,7 @@ use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watche
 use parking_lot::Mutex;
 use peer_core::{monitor::RepositoryBaseline, RepositoryWatchStatus};
 use std::{
+    future::Future,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -10,7 +11,7 @@ use std::{
 };
 use tauri::Emitter;
 use tokio::{
-    sync::{mpsc, oneshot},
+    sync::{mpsc, oneshot, Mutex as AsyncMutex},
     task::JoinHandle,
     time::{sleep_until, Instant},
 };
@@ -18,10 +19,12 @@ use tokio::{
 const DEBOUNCE: Duration = Duration::from_millis(300);
 const MAX_DELAY: Duration = Duration::from_secs(1);
 const PROBE_TIMEOUT: Duration = Duration::from_secs(30);
+const PROBE_TIMEOUT_ERROR: &str = "Repository change detection timed out; refresh manually";
 
 #[derive(Default)]
 pub struct RepositoryWatch {
     active: Mutex<Option<ActiveWatch>>,
+    probes: Arc<ProbeCoordinator>,
 }
 
 struct ActiveWatch {
@@ -34,6 +37,59 @@ impl Drop for ActiveWatch {
     fn drop(&mut self) {
         self.signals.stopped.store(true, Ordering::Release);
         self.worker.abort();
+    }
+}
+
+#[derive(Default)]
+struct ProbeCoordinator {
+    // The monitor, not its replaceable watch worker, owns this task. Dropping
+    // an awaiting worker must not detach a still-running blocking filesystem scan.
+    in_flight: AsyncMutex<Option<InFlightProbe>>,
+}
+
+struct InFlightProbe {
+    owner: Arc<Signals>,
+    worker: JoinHandle<Result<bool, String>>,
+}
+
+impl ProbeCoordinator {
+    async fn run<F>(
+        &self,
+        owner: &Arc<Signals>,
+        start: impl FnOnce() -> F,
+    ) -> Option<Result<bool, String>>
+    where
+        F: Future<Output = Result<bool, String>> + Send + 'static,
+    {
+        let mut slot = self.in_flight.lock().await;
+        if owner.stopped.load(Ordering::Acquire) {
+            return None;
+        }
+        if let Some(previous) = slot.as_mut() {
+            if !Arc::ptr_eq(&previous.owner, owner) {
+                // A replaced watch's result belongs only to its old snapshot.
+                // Drain its actual work before allowing the new baseline to run.
+                let _ = (&mut previous.worker).await;
+                *slot = None;
+            }
+        }
+        if owner.stopped.load(Ordering::Acquire) {
+            return None;
+        }
+        let pending = slot.get_or_insert_with(|| InFlightProbe {
+            owner: Arc::clone(owner),
+            worker: tokio::spawn(start()),
+        });
+        let result = (&mut pending.worker)
+            .await
+            .map_err(|error| format!("Cannot check repository changes: {error}"))
+            .and_then(|result| result);
+        *slot = None;
+        if owner.stopped.load(Ordering::Acquire) {
+            None
+        } else {
+            Some(result)
+        }
     }
 }
 
@@ -129,6 +185,7 @@ impl RepositoryWatch {
                 Arc::clone(&signals),
                 receiver,
                 initial_sender,
+                Arc::clone(&self.probes),
             ));
             *active = Some(ActiveWatch {
                 id: watch_id,
@@ -183,10 +240,20 @@ async fn install(
     .map_err(|error| format!("Cannot start repository monitor: {error}"))?
 }
 
-async fn probe(baseline: &Arc<RepositoryBaseline>) -> Result<bool, String> {
-    tokio::time::timeout(PROBE_TIMEOUT, baseline.probe())
-        .await
-        .map_err(|_| "Repository change detection timed out; refresh manually".to_owned())?
+async fn probe(
+    work: impl Future<Output = Option<Result<bool, String>>>,
+    on_timeout: impl FnOnce(),
+) -> Option<Result<bool, String>> {
+    tokio::pin!(work);
+    match tokio::time::timeout(PROBE_TIMEOUT, &mut work).await {
+        Ok(result) => result,
+        Err(_) => {
+            on_timeout();
+            // Keep waiting after publishing unavailable status. Pending focus
+            // checks remain coalesced in Signals and run once this scan finishes.
+            work.await
+        }
+    }
 }
 
 fn merge(status: &mut RepositoryWatchStatus, result: Result<bool, String>) {
@@ -228,7 +295,9 @@ async fn run_watch(
     signals: Arc<Signals>,
     mut receiver: mpsc::Receiver<()>,
     initial: oneshot::Sender<RepositoryWatchStatus>,
+    probes: Arc<ProbeCoordinator>,
 ) {
+    let mut initial = Some(initial);
     let baseline = match baseline {
         Ok(baseline) => baseline,
         Err(error) => {
@@ -250,12 +319,32 @@ async fn run_watch(
     // Watch first, then compare with the opening-time baseline: edits between
     // opening and activation, and during subscription, cannot disappear.
     if let Some(baseline) = &baseline {
-        merge(&mut status, probe(baseline).await);
+        let result = probe(
+            probes.run(&signals, || {
+                let baseline = Arc::clone(baseline);
+                async move { baseline.probe().await }
+            }),
+            || {
+                merge(&mut status, Err(PROBE_TIMEOUT_ERROR.to_owned()));
+                if !signals.stopped.load(Ordering::Acquire) {
+                    let _ = app.emit("repository-changed", &status);
+                }
+                if let Some(initial) = initial.take() {
+                    let _ = initial.send(status.clone());
+                }
+            },
+        )
+        .await;
+        if let Some(result) = result {
+            merge(&mut status, result);
+        }
     }
     if !signals.stopped.load(Ordering::Acquire) {
         let _ = app.emit("repository-changed", &status);
     }
-    let _ = initial.send(status.clone());
+    if let Some(initial) = initial.take() {
+        let _ = initial.send(status.clone());
+    }
     while let Some(explicit) = next_probe(&mut receiver, &signals).await {
         let changed_before = status.changed;
         let had_error = status.error.is_some();
@@ -269,7 +358,22 @@ async fn run_watch(
         // inspect the source and report errors (e.g. a moved/disconnected repo).
         if explicit || (!status.changed && status.error.is_none()) {
             if let Some(baseline) = &baseline {
-                merge(&mut status, probe(baseline).await);
+                let result = probe(
+                    probes.run(&signals, || {
+                        let baseline = Arc::clone(baseline);
+                        async move { baseline.probe().await }
+                    }),
+                    || {
+                        merge(&mut status, Err(PROBE_TIMEOUT_ERROR.to_owned()));
+                        if !signals.stopped.load(Ordering::Acquire) {
+                            let _ = app.emit("repository-changed", &status);
+                        }
+                    },
+                )
+                .await;
+                if let Some(result) = result {
+                    merge(&mut status, result);
+                }
             }
         }
         if !signals.stopped.load(Ordering::Acquire)
@@ -295,6 +399,192 @@ mod tests {
             }),
             receiver,
         )
+    }
+
+    fn stalled_scan() -> (
+        impl Future<Output = Result<bool, String>> + Send,
+        oneshot::Receiver<()>,
+        std::sync::mpsc::Sender<bool>,
+    ) {
+        let (started, started_receiver) = oneshot::channel();
+        let (finish, finished) = std::sync::mpsc::channel();
+        let work = async move {
+            tokio::task::spawn_blocking(move || {
+                let _ = started.send(());
+                finished.recv().map_err(|error| error.to_string())
+            })
+            .await
+            .unwrap()
+        };
+        (work, started_receiver, finish)
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn stalled_scan_times_out_then_completes_and_runs_coalesced_checks() {
+        use std::sync::atomic::AtomicUsize;
+
+        let monitor = RepositoryWatch::default();
+        let (signals, mut receiver) = signals();
+        let (work, started, finish) = stalled_scan();
+        let scans = Arc::new(AtomicUsize::new(0));
+        let worker_scans = Arc::clone(&scans);
+        let worker_signals = Arc::clone(&signals);
+        let probes = Arc::clone(&monitor.probes);
+        let (timed_out, timeout) = oneshot::channel();
+        let (results, mut result_receiver) = mpsc::channel(2);
+        let worker = tokio::spawn(async move {
+            let result = probe(
+                probes.run(&worker_signals, || {
+                    worker_scans.fetch_add(1, Ordering::SeqCst);
+                    work
+                }),
+                || {
+                    let _ = timed_out.send(());
+                },
+            )
+            .await;
+            results.send(result).await.unwrap();
+            while next_probe(&mut receiver, &worker_signals).await.is_some() {
+                let result = probes
+                    .run(&worker_signals, || {
+                        worker_scans.fetch_add(1, Ordering::SeqCst);
+                        async { Ok(false) }
+                    })
+                    .await;
+                results.send(result).await.unwrap();
+            }
+        });
+        *monitor.active.lock() = Some(ActiveWatch {
+            id: "current".into(),
+            signals,
+            worker,
+        });
+        started.await.unwrap();
+        tokio::time::advance(PROBE_TIMEOUT).await;
+        timeout.await.unwrap();
+        for _ in 0..10_000 {
+            monitor.check("current");
+        }
+        tokio::time::advance(PROBE_TIMEOUT * 3).await;
+        tokio::task::yield_now().await;
+        assert_eq!(scans.load(Ordering::SeqCst), 1);
+        assert!(result_receiver.try_recv().is_err());
+
+        finish.send(true).unwrap();
+        assert_eq!(result_receiver.recv().await, Some(Some(Ok(true))));
+        assert_eq!(result_receiver.recv().await, Some(Some(Ok(false))));
+        assert_eq!(scans.load(Ordering::SeqCst), 2);
+        monitor.stop("current");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn canceled_and_replaced_watches_wait_for_stalled_scan_without_owning_its_result() {
+        use std::sync::atomic::AtomicUsize;
+
+        let monitor = RepositoryWatch::default();
+        let (old_signals, _) = signals();
+        let (work, started, finish) = stalled_scan();
+        let probes = Arc::clone(&monitor.probes);
+        let worker_signals = Arc::clone(&old_signals);
+        let (old_result, old_receiver) = oneshot::channel();
+        let worker = tokio::spawn(async move {
+            let result = probes.run(&worker_signals, || work).await;
+            let _ = old_result.send(result);
+        });
+        *monitor.active.lock() = Some(ActiveWatch {
+            id: "old".into(),
+            signals: old_signals,
+            worker,
+        });
+        started.await.unwrap();
+        // Cancellation before the original deadline must retain the scan too.
+        monitor.stop("old");
+        assert!(old_receiver.await.is_err());
+
+        let scans = Arc::new(AtomicUsize::new(1));
+        let mut current_result = None;
+        for id in ["replacement", "current"] {
+            let (signals, _) = signals();
+            let worker_signals = Arc::clone(&signals);
+            let probes = Arc::clone(&monitor.probes);
+            let worker_scans = Arc::clone(&scans);
+            let (timed_out, timeout) = oneshot::channel();
+            let (result_sender, result_receiver) = oneshot::channel();
+            let worker = tokio::spawn(async move {
+                let result = probe(
+                    probes.run(&worker_signals, || {
+                        worker_scans.fetch_add(1, Ordering::SeqCst);
+                        async { Ok(false) }
+                    }),
+                    || {
+                        let _ = timed_out.send(());
+                    },
+                )
+                .await;
+                let _ = result_sender.send(result);
+            });
+            // Dropping the previous ActiveWatch aborts a waiter, not the scan.
+            *monitor.active.lock() = Some(ActiveWatch {
+                id: id.into(),
+                signals,
+                worker,
+            });
+            tokio::task::yield_now().await;
+            tokio::time::advance(PROBE_TIMEOUT).await;
+            timeout.await.unwrap();
+            for _ in 0..100 {
+                monitor.check(id);
+            }
+            assert_eq!(scans.load(Ordering::SeqCst), 1);
+            current_result = Some(result_receiver);
+        }
+        finish.send(true).unwrap();
+        // The old scan is dirty, but the current snapshot's own scan is clean.
+        assert_eq!(current_result.unwrap().await.unwrap(), Some(Ok(false)));
+        assert_eq!(scans.load(Ordering::SeqCst), 2);
+        monitor.shutdown();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn canceled_probe_wait_resumes_same_task_and_rejects_stopped_owner() {
+        let probes = Arc::new(ProbeCoordinator::default());
+        let (owner, _) = signals();
+        let (work, started, finish) = stalled_scan();
+        let worker_owner = Arc::clone(&owner);
+        let worker_probes = Arc::clone(&probes);
+        let waiter = tokio::spawn(async move {
+            tokio::time::timeout(PROBE_TIMEOUT, worker_probes.run(&worker_owner, || work)).await
+        });
+        started.await.unwrap();
+        tokio::time::advance(PROBE_TIMEOUT).await;
+        assert!(waiter.await.unwrap().is_err());
+        finish.send(true).unwrap();
+        assert_eq!(
+            probes
+                .run(&owner, || async { panic!("retained scan was replaced") })
+                .await,
+            Some(Ok(true))
+        );
+
+        let (work, started, finish) = stalled_scan();
+        let worker_owner = Arc::clone(&owner);
+        let worker_probes = Arc::clone(&probes);
+        let waiter = tokio::spawn(async move { worker_probes.run(&worker_owner, || work).await });
+        started.await.unwrap();
+        owner.stopped.store(true, Ordering::Release);
+        finish.send(true).unwrap();
+        assert_eq!(waiter.await.unwrap(), None);
+        assert_eq!(
+            probes
+                .run(&owner, || async { panic!("stopped owner started a scan") })
+                .await,
+            None
+        );
+        let (new_owner, _) = signals();
+        assert_eq!(
+            probes.run(&new_owner, || async { Ok(false) }).await,
+            Some(Ok(false))
+        );
     }
 
     #[tokio::test]

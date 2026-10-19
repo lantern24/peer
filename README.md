@@ -208,6 +208,8 @@ Snapshot IDs and source fingerprints prevent feedback from attaching to a differ
 
 Repository monitoring compares Git-aware file metadata, submodule HEAD/dirty state, effective comparison-related configuration, and logical index/revision state against a baseline captured during snapshot creation; it does not reload displayed source or reconcile saved feedback. Native events share one pending rescan, with a 300 ms quiet period and a one-second maximum debounce window. An initial probe after watcher installation catches edits made before activation; focus/visibility checks and watcher overflow events request another probe. Snapshot/watch identities reject late events after switching repositories or refreshing.
 
+A timed-out probe reports monitoring unavailable but remains the single in-flight scan until its work completes. Focus checks coalesce behind it, including after repository switches, so a stalled filesystem cannot accumulate blocking scans. Manual refresh remains available.
+
 A future MCP adapter can instantiate the Rust `Inspector` against the same store. MCP transport, browser distribution, Git history browsing, repository-wide text search, image comparison, and editing are not included.
 
 ## Validation
