@@ -4,6 +4,7 @@ import type { Preferences, RepositoryWatchStatus } from "../../src/types";
 import { execFileSync } from "node:child_process";
 import {
   appendFileSync,
+  chmodSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -276,6 +277,92 @@ describe("Repository change notifications", () => {
     await $(notice).waitForExist();
     await refresh();
     await expect($('.tree-file[title="renamed.txt"]')).not.toExist();
+  });
+
+  it("notifies about submodule content and HEAD changes without refreshing the review", async () => {
+    const dependencySource = join(workspace, "dependency-source");
+    createRepository(dependencySource);
+    git(
+      repo,
+      "-c",
+      "protocol.file.allow=always",
+      "submodule",
+      "add",
+      dependencySource,
+      "dependency",
+    );
+    git(repo, "commit", "-m", "Add dependency");
+    const dependency = join(repo, "dependency");
+    await refresh();
+    expect((await focusProbe()).changed).toBe(false);
+    await expect($('.tree-file[title="dependency"]')).not.toExist();
+    const index = readFileSync(join(repo, ".git", "index"));
+    const dependencyIndexPath = join(
+      git(dependency, "rev-parse", "--absolute-git-dir"),
+      "index",
+    );
+    const dependencyIndex = readFileSync(dependencyIndexPath);
+
+    writeFileSync(join(dependency, file), source("Submodule external edit"));
+    await $(notice).waitForExist();
+    expect(await renderedSource()).toContain("Current line");
+    await expect($('.tree-file[title="dependency"]')).not.toExist();
+    expect(readFileSync(join(repo, ".git", "index"))).toEqual(index);
+    expect(readFileSync(dependencyIndexPath)).toEqual(dependencyIndex);
+    await browser.saveScreenshot(
+      resolve("test-results/repository-submodule-notice.png"),
+    );
+    await refresh();
+    await $('.tree-file[title="dependency"]').waitForExist();
+    expect((await focusProbe()).changed).toBe(false);
+
+    git(dependency, "restore", "--worktree", "--", file);
+    await $(notice).waitForExist();
+    await refresh();
+    await expect($('.tree-file[title="dependency"]')).not.toExist();
+    expect((await focusProbe()).changed).toBe(false);
+
+    // An empty commit changes only metadata under the superproject Git directory.
+    git(
+      dependency,
+      "-c",
+      "user.name=Peer Watch Test",
+      "-c",
+      "user.email=watch@example.invalid",
+      "commit",
+      "--allow-empty",
+      "-m",
+      "Advance dependency HEAD",
+    );
+    await $(notice).waitForExist();
+    await expect($('.tree-file[title="dependency"]')).not.toExist();
+    await refresh();
+    await $('.tree-file[title="dependency"]').waitForExist();
+  });
+
+  it("notifies when Git configuration alone changes the comparison", async () => {
+    git(repo, "config", "core.filemode", "false");
+    chmodSync(join(repo, "unchanged.txt"), 0o755);
+    await refresh();
+    expect((await focusProbe()).changed).toBe(false);
+    await expect($('.tree-file[title="unchanged.txt"]')).not.toExist();
+    git(repo, "config", "user.name", "Unrelated identity change");
+    expect((await focusProbe()).changed).toBe(false);
+    await expect($(notice)).not.toExist();
+
+    const index = readFileSync(join(repo, ".git", "index"));
+    git(repo, "config", "core.filemode", "true");
+    await $(notice).waitForExist();
+    await expect($('.tree-file[title="unchanged.txt"]')).not.toExist();
+    expect(await renderedSource()).toContain("Current line");
+    expect(readFileSync(join(repo, ".git", "index"))).toEqual(index);
+    await browser.saveScreenshot(
+      resolve("test-results/repository-config-notice.png"),
+    );
+    await refresh();
+    await $('.tree-file[title="unchanged.txt"]').waitForExist();
+    expect((await focusProbe()).changed).toBe(false);
+    await expect($(notice)).not.toExist();
   });
 
   it("detects staging and linked-worktree changes without watching inactive repositories", async () => {

@@ -27,6 +27,193 @@ struct GitState {
     index: String,
     revisions: String,
     head: String,
+    configuration: BTreeMap<String, String>,
+    submodules: BTreeMap<String, SubmoduleState>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct SubmoduleState {
+    diff: String,
+    git_dir: Option<PathBuf>,
+    common_dir: Option<PathBuf>,
+}
+
+// Only settings consumed by inventory, working-tree conversion, or the Git
+// comparisons we expose. Identity, remotes, colors, external diff and textconv
+// settings do not affect those comparisons.
+fn comparison_config(key: &str) -> bool {
+    matches!(
+        key,
+        "core.filemode"
+            | "core.symlinks"
+            | "core.ignorecase"
+            | "core.autocrlf"
+            | "core.eol"
+            | "core.safecrlf"
+            | "core.checkroundtripencoding"
+            | "core.attributesfile"
+            | "core.excludesfile"
+            | "core.bigfilethreshold"
+            | "core.sparsecheckout"
+            | "core.sparsecheckoutcone"
+            | "diff.algorithm"
+            | "diff.renamelimit"
+            | "diff.ignoresubmodules"
+            | "diff.indentheuristic"
+            | "diff.noprefix"
+            | "diff.mnemonicprefix"
+            | "diff.srcprefix"
+            | "diff.dstprefix"
+            | "diff.relative"
+    ) || (key.starts_with("diff.") && (key.ends_with(".binary") || key.ends_with(".algorithm")))
+        || (key.starts_with("filter.")
+            && [".clean", ".process", ".required"]
+                .iter()
+                .any(|suffix| key.ends_with(suffix)))
+        || (key.starts_with("submodule.") && key.ends_with(".ignore"))
+}
+
+async fn configuration(git: &str, root: &Path) -> Result<BTreeMap<String, String>, String> {
+    // Git resolves system/global/includes/local/worktree configuration in
+    // precedence order. Keep the effective value rather than file bytes or
+    // shadowed entries; reordering unrelated settings is not a source change.
+    let bytes = repository::git(git, root, &["config", "--null", "--list", "--includes"]).await?;
+    let mut values = BTreeMap::new();
+    for entry in paths(&bytes) {
+        let entry = entry?;
+        let (key, value) = entry.split_once('\n').unwrap_or((entry, "true"));
+        if comparison_config(key) {
+            values.insert(key.to_owned(), value.to_owned());
+        }
+    }
+    Ok(values)
+}
+
+async fn submodules(
+    git: &str,
+    root: &Path,
+    index: &[u8],
+) -> Result<BTreeMap<String, SubmoduleState>, String> {
+    let mut states = BTreeMap::new();
+    for entry in paths(index) {
+        let entry = entry?;
+        let (header, path) = entry
+            .split_once('\t')
+            .ok_or("Cannot parse Git index entry")?;
+        if header.split_whitespace().nth(1) != Some("160000") || states.contains_key(path) {
+            continue;
+        }
+        let absolute = repository::safe_path(root, path)?;
+        let owned = absolute.clone();
+        let initialized = tokio::task::spawn_blocking(move || {
+            match fs::symlink_metadata(&owned) {
+                Ok(metadata) if metadata.file_type().is_symlink() => {
+                    return Err("Refusing to follow a submodule directory symlink".to_owned());
+                }
+                Ok(metadata) if metadata.is_dir() => {}
+                // A gitlink replaced by an ordinary file uses normal file
+                // metadata; never materialize its source body in a probe.
+                Ok(_) => return Ok(None),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    return Ok(Some(false));
+                }
+                Err(error) => return Err(format!("Cannot inspect submodule: {error}")),
+            }
+            match fs::symlink_metadata(owned.join(".git")) {
+                Ok(_) => Ok(Some(true)),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Some(false)),
+                Err(error) => Err(format!("Cannot inspect submodule Git directory: {error}")),
+            }
+        })
+        .await
+        .map_err(|error| format!("Cannot inspect submodule: {error}"))??;
+        let Some(initialized) = initialized else {
+            continue;
+        };
+        // A short gitlink patch records the actual checked-out HEAD and dirty
+        // marker (including nested modules), not just the containing directory's
+        // stat. Run sequentially per gitlink, never per source file. Git diff's
+        // stat-cache refresh also needs disabling; optional locks alone do not
+        // prevent it from rewriting the superproject index.
+        let diff = git_hash(
+            git,
+            root,
+            &[
+                "-c",
+                "diff.autoRefreshIndex=false",
+                "--literal-pathspecs",
+                "diff",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--submodule=short",
+                "--ignore-submodules=none",
+                "--",
+                path,
+            ],
+        )
+        .await?;
+        let (git_dir, common_dir) = if initialized {
+            (
+                Some(git_directory(git, &absolute, "--git-dir").await?),
+                Some(git_directory(git, &absolute, "--git-common-dir").await?),
+            )
+        } else {
+            (None, None)
+        };
+        states.insert(
+            path.to_owned(),
+            SubmoduleState {
+                diff,
+                git_dir,
+                common_dir,
+            },
+        );
+    }
+    Ok(states)
+}
+
+fn relevant_git_path(relative: &Path) -> bool {
+    relative.as_os_str().is_empty()
+        || matches!(
+            relative.to_str(),
+            Some(
+                "HEAD"
+                    | "index"
+                    | "packed-refs"
+                    | "config"
+                    | "config.worktree"
+                    | "shallow"
+                    | "commondir"
+                    | "gitdir"
+                    | "info/exclude"
+                    | "info/attributes"
+                    | "info/sparse-checkout"
+            )
+        )
+        || relative.starts_with("refs")
+        || relative.starts_with("reftable")
+        // Absorbed and nested submodules live below modules/<name>. Their
+        // metadata can change without an event anywhere in their worktree.
+        || (relative.starts_with("modules")
+            && relative.ancestors().any(|path| {
+                path.file_name()
+                    .is_some_and(|name| name == "refs" || name == "reftable")
+            }))
+        || (relative.starts_with("modules")
+            && relative.file_name().is_some_and(|name| {
+                matches!(
+                    name.to_str(),
+                    Some(
+                        "HEAD"
+                            | "index"
+                            | "packed-refs"
+                            | "config"
+                            | "config.worktree"
+                            | "exclude"
+                            | "attributes"
+                    )
+                )
+            }))
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -120,10 +307,14 @@ async fn git_state(
 ) -> Result<GitState, String> {
     // Logical index entries deliberately exclude Git's refreshable stat cache,
     // lock files, reflogs, object storage, and packed-ref representation changes.
-    // No diff/status command or source-content hashing is needed for a probe.
-    let index = git_hash(git, root, &["ls-files", "--stage", "-v", "-z"]).await?;
+    let index_bytes = repository::git(git, root, &["ls-files", "--stage", "-v", "-z"]).await?;
+    let submodules = submodules(git, root, &index_bytes).await?;
+    let index = tokio::task::spawn_blocking(move || hash(&index_bytes))
+        .await
+        .map_err(|error| format!("Cannot inspect Git index: {error}"))?;
+    let configuration = configuration(git, root).await?;
     // Resolve only revisions used by this comparison. Other worktrees' refs
-    // and Git configuration may wake a probe but do not make this review stale.
+    // may wake a probe but do not make this review stale.
     // --revs-only emits nothing for an unborn HEAD or a removed base ref.
     let revisions = match base_revision {
         Some(base) => {
@@ -172,6 +363,8 @@ async fn git_state(
         index,
         revisions,
         head,
+        configuration,
+        submodules,
     })
 }
 
@@ -205,19 +398,26 @@ impl RepositoryBaseline {
         let state = git_state(git, root, &git_dir, base_revision.as_deref()).await?;
         let bytes = inventory(git, root).await?;
         let owned_root = root.to_path_buf();
-        let files = tokio::task::spawn_blocking(move || {
+        let (state, files) = tokio::task::spawn_blocking(move || {
             let mut files = BTreeMap::new();
             for path in paths(&bytes) {
                 let path = path?;
+                if state.submodules.contains_key(path) {
+                    continue;
+                }
                 if let Some(stamp) = file_stamp(&owned_root, path)? {
                     files.insert(path.to_owned(), stamp);
                 }
             }
-            Ok::<_, String>(files)
+            Ok::<_, String>((state, files))
         })
         .await
         .map_err(|error| format!("Cannot inspect repository files: {error}"))??;
         let mut watch_paths = vec![root.to_path_buf(), git_dir.clone(), common_dir.clone()];
+        for submodule in state.submodules.values() {
+            watch_paths.extend(submodule.git_dir.iter().cloned());
+            watch_paths.extend(submodule.common_dir.iter().cloned());
+        }
         watch_paths.sort();
         watch_paths.dedup();
         let mut parents: Vec<PathBuf> = Vec::new();
@@ -245,26 +445,21 @@ impl RepositoryBaseline {
     /// Filter Git housekeeping and read/access feedback before waking a probe.
     /// Other paths are only hints; the Git-aware inventory is authoritative.
     pub fn relevant_event_path(&self, path: &Path) -> bool {
+        // Check the most specific module directories before their containing
+        // superproject Git directory, which otherwise filters modules away.
+        for directory in self
+            .state
+            .submodules
+            .values()
+            .flat_map(|module| module.git_dir.iter().chain(module.common_dir.iter()))
+        {
+            if let Ok(relative) = path.strip_prefix(directory) {
+                return relevant_git_path(relative);
+            }
+        }
         for directory in [&self.git_dir, &self.common_dir] {
             if let Ok(relative) = path.strip_prefix(directory) {
-                return relative.as_os_str().is_empty()
-                    || matches!(
-                        relative.to_str(),
-                        Some(
-                            "HEAD"
-                                | "index"
-                                | "packed-refs"
-                                | "config"
-                                | "config.worktree"
-                                | "shallow"
-                                | "commondir"
-                                | "gitdir"
-                                | "info/exclude"
-                                | "info/sparse-checkout"
-                        )
-                    )
-                    || relative.starts_with("refs")
-                    || relative.starts_with("reftable");
+                return relevant_git_path(relative);
             }
         }
         path.starts_with(&self.root)
@@ -294,6 +489,9 @@ impl RepositoryBaseline {
             // stages are adjacent. No second path collection is necessary.
             for path in paths(&bytes) {
                 let path = path?;
+                if baseline.state.submodules.contains_key(path) {
+                    continue;
+                }
                 if previous == Some(path) {
                     continue;
                 }
