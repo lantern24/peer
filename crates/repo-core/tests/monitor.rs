@@ -792,15 +792,13 @@ async fn executable_modes_and_symlink_replacements_are_detected_without_followin
 #[cfg(unix)]
 #[tokio::test]
 async fn snapshot_rejects_source_and_inventory_changes_during_initial_capture() {
-    use std::os::unix::fs::PermissionsExt;
     let root = fixture();
     let wrapper = root.path().join(".git/monitor-git");
     let real_git = isolated_fixture_git(root.path());
     let quoted_git = format!("'{}'", real_git.to_str().unwrap().replace('\'', "'\\''"));
-    fs::write(&wrapper, format!(
+    write_executable(&wrapper, &format!(
         "#!/bin/sh\ncase \" $* \" in\n*' ls-files --stage -z '*)\n  if [ -f .git/monitor-pending ]; then\n    rm .git/monitor-pending\n    printf 'changed during opening\\n' > source.txt\n    printf 'new during opening\\n' > new.txt\n  fi\n  ;;\nesac\nexec {quoted_git} \"$@\"\n"
-    )).unwrap();
-    fs::set_permissions(&wrapper, fs::Permissions::from_mode(0o755)).unwrap();
+    ));
     fs::write(root.path().join(".git/monitor-pending"), "").unwrap();
     let result = repository::create_snapshot(
         root.path().to_str().unwrap(),
@@ -821,11 +819,31 @@ async fn snapshot_rejects_source_and_inventory_changes_during_initial_capture() 
         .unwrap());
 }
 
+#[cfg(unix)]
+fn write_executable(path: &Path, contents: &str) {
+    // Keep writable executable descriptors out of this process: concurrent
+    // Git forks can inherit them and cause Linux ETXTBSY even after fs::write.
+    let output = Command::new("/bin/sh")
+        .args([
+            "-c",
+            "printf '%s' \"$2\" > \"$1\" && chmod 755 \"$1\"",
+            "peer-fixture",
+        ])
+        .arg(path)
+        .arg(contents)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 // Keep HOME/XDG/system attributes and configuration process-local: these tests
 // must never inspect the developer's global attributes or mutate suite-wide env.
 #[cfg(unix)]
 fn attribute_git(directory: &Path) -> std::path::PathBuf {
-    use std::os::unix::fs::PermissionsExt;
     let directory = directory.canonicalize().unwrap();
     let wrapper = directory.join("git");
     // Linked worktrees share this executable, including probes still exiting
@@ -837,17 +855,15 @@ fn attribute_git(directory: &Path) -> std::path::PathBuf {
     fs::create_dir_all(directory.join("xdg")).unwrap();
     let quote = |path: &Path| format!("'{}'", path.to_str().unwrap().replace('\'', "'\\''"));
     let real_git = repository::discover_git(None);
-    fs::write(
+    write_executable(
         &wrapper,
-        format!(
+        &format!(
             "#!/bin/sh\nexport HOME={}\nexport XDG_CONFIG_HOME={}\nexport GIT_CONFIG_GLOBAL=/dev/null\nexport GIT_CONFIG_NOSYSTEM=1\nexport GIT_ATTR_NOSYSTEM=1\nexec {} \"$@\"\n",
             quote(&directory.join("home")),
             quote(&directory.join("xdg")),
             quote(Path::new(&real_git)),
         ),
-    )
-    .unwrap();
-    fs::set_permissions(&wrapper, fs::Permissions::from_mode(0o755)).unwrap();
+    );
     wrapper
 }
 
@@ -1255,20 +1271,17 @@ async fn invalid_attribute_file_types_are_probe_errors_not_clean_results() {
 #[cfg(unix)]
 #[tokio::test]
 async fn unsupported_git_attribute_discovery_disables_monitoring_without_path_guesses() {
-    use std::os::unix::fs::PermissionsExt;
     let root = fixture();
     let environment = tempfile::tempdir().unwrap();
     let isolated = attribute_git(environment.path());
     let wrapper = environment.path().join("old-git");
-    fs::write(
+    write_executable(
         &wrapper,
-        format!(
+        &format!(
             "#!/bin/sh\ncase \" $* \" in\n*' var GIT_ATTR_'*) printf 'usage: git var\\n' >&2; exit 129;;\nesac\nexec '{}' \"$@\"\n",
             isolated.to_str().unwrap().replace('\'', "'\\''"),
         ),
-    )
-    .unwrap();
-    fs::set_permissions(&wrapper, fs::Permissions::from_mode(0o755)).unwrap();
+    );
     let opened = attribute_snapshot(root.path(), &wrapper).await;
     assert!(opened
         .repository_watch

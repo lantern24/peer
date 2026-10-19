@@ -904,7 +904,7 @@ mod tests {
     #[cfg(unix)]
     mod attributes {
         use super::*;
-        use std::{fs, os::unix::fs::PermissionsExt, process::Command};
+        use std::{fs, process::Command};
 
         pub(super) struct Fixture {
             _temp: tempfile::TempDir,
@@ -923,16 +923,28 @@ mod tests {
                 let git = root.join("git-fixture");
                 // Environment belongs to this child only, never the test
                 // process. Neither Git config nor attributes use user files.
-                fs::write(
-                    &git,
-                    "#!/bin/sh\n\
+                // A separate writer process prevents concurrent Git forks
+                // inheriting writable script descriptors (Linux ETXTBSY).
+                let written = Command::new("/bin/sh")
+                    .args([
+                        "-c",
+                        "printf '%s' \"$2\" > \"$1\" && chmod 755 \"$1\"",
+                        "peer-fixture",
+                    ])
+                    .arg(&git)
+                    .arg("#!/bin/sh\n\
                      fixture=$(dirname \"$0\")\n\
                      export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null\n\
                      export GIT_CONFIG_SYSTEM=/dev/null GIT_ATTR_NOSYSTEM=1\n\
                      exec git -c core.attributesFile=\"$fixture/external/config/git/attributes\" \"$@\"\n",
-                )
-                .unwrap();
-                fs::set_permissions(&git, fs::Permissions::from_mode(0o755)).unwrap();
+                    )
+                    .output()
+                    .unwrap();
+                assert!(
+                    written.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&written.stderr)
+                );
                 let output = Command::new(&git)
                     .args(["init", "-b", "main"])
                     .current_dir(&repository)
