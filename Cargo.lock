@@ -2640,7 +2640,7 @@ dependencies = [
 
 [[package]]
 name = "peer"
-version = "0.1.3"
+version = "0.2.0"
 dependencies = [
  "block2",
  "notify",
@@ -2662,7 +2662,7 @@ dependencies = [
 
 [[package]]
 name = "peer-core"
-version = "0.1.3"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "fs2",
