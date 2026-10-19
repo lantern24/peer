@@ -2,7 +2,9 @@ use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watche
 use parking_lot::Mutex;
 use peer_core::{monitor::RepositoryBaseline, RepositoryWatchStatus};
 use std::{
+    collections::BTreeMap,
     future::Future,
+    path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -98,6 +100,7 @@ struct Signals {
     // Never queue notify Events, path lists, or one task per filesystem event.
     sender: mpsc::Sender<()>,
     force: AtomicBool,
+    rearm: AtomicBool,
     stopped: AtomicBool,
     error: Mutex<Option<String>>,
 }
@@ -125,8 +128,18 @@ impl Signals {
                 {
                     return;
                 }
+                if event.need_rescan()
+                    || event.paths.is_empty()
+                    || event.paths.iter().any(|path| {
+                        external_attributes(baseline)
+                            .any(|attribute| attribute != path && attribute.starts_with(path))
+                    })
+                {
+                    self.rearm.store(true, Ordering::Release);
+                }
             }
             Err(error) => {
+                self.rearm.store(true, Ordering::Release);
                 let mut slot = self.error.lock();
                 if slot.is_none() {
                     *slot = Some(error.to_string().chars().take(2048).collect());
@@ -139,7 +152,166 @@ impl Signals {
 
 // Some native backends join an OS thread while dropping. Keep both install and
 // teardown off async/UI threads, including cancellation during installation.
-struct BlockingWatcher(Option<RecommendedWatcher>);
+struct BlockingWatcher(Option<Watchers>);
+
+struct Watchers {
+    _repository: RecommendedWatcher,
+    attributes: Option<RecommendedWatcher>,
+    attribute_anchors: Vec<PathBuf>,
+}
+
+fn external_attributes(baseline: &RepositoryBaseline) -> impl Iterator<Item = &Path> {
+    baseline.attribute_paths().filter(move |path| {
+        !baseline
+            .watch_paths()
+            .iter()
+            .any(|root| path.starts_with(root))
+    })
+}
+
+#[derive(PartialEq, Eq)]
+struct DirectoryIdentity {
+    #[cfg(unix)]
+    device: u64,
+    #[cfg(unix)]
+    inode: u64,
+    #[cfg(not(unix))]
+    created: Option<std::time::SystemTime>,
+}
+
+fn attribute_directories(
+    baseline: &RepositoryBaseline,
+    anchors: &[PathBuf],
+) -> Result<BTreeMap<PathBuf, DirectoryIdentity>, String> {
+    let mut directories = BTreeMap::new();
+    // Keep initial anchors while moving closer to newly created directories.
+    // Otherwise deleting that whole new tree can retire every subscription.
+    // All subscriptions remain non-recursive, including HOME and temp roots.
+    for (mut candidate, mut remaining) in external_attributes(baseline)
+        .map(|attribute| (attribute.parent(), 2))
+        .chain(anchors.iter().map(|path| (Some(path.as_path()), 1)))
+    {
+        while let Some(path) = candidate {
+            if directories.contains_key(path) {
+                remaining -= 1;
+                if remaining == 0 {
+                    break;
+                }
+                candidate = path.parent();
+                continue;
+            }
+            match std::fs::metadata(path) {
+                Ok(metadata) if metadata.is_dir() => {
+                    #[cfg(unix)]
+                    let identity = {
+                        use std::os::unix::fs::MetadataExt;
+                        DirectoryIdentity {
+                            device: metadata.dev(),
+                            inode: metadata.ino(),
+                        }
+                    };
+                    #[cfg(not(unix))]
+                    let identity = DirectoryIdentity {
+                        created: metadata.created().ok(),
+                    };
+                    directories.insert(path.to_path_buf(), identity);
+                    remaining -= 1;
+                    if remaining == 0 {
+                        break;
+                    }
+                }
+                Ok(_) => {}
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+                    ) => {}
+                Err(error) => {
+                    return Err(format!("Cannot inspect {}: {error}", path.display()));
+                }
+            }
+            candidate = path.parent();
+        }
+    }
+    Ok(directories)
+}
+
+fn new_watcher(
+    baseline: &Arc<RepositoryBaseline>,
+    signals: &Arc<Signals>,
+) -> Result<RecommendedWatcher, String> {
+    let baseline = Arc::clone(baseline);
+    let signals = Arc::clone(signals);
+    RecommendedWatcher::new(
+        move |event| signals.event(&baseline, event),
+        Config::default().with_follow_symlinks(false),
+    )
+    .map_err(|error| format!("Cannot watch repository: {error}"))
+}
+
+// Called only on the blocking pool. Install the replacement before retiring
+// the old watcher; directory identities also catch remove/recreate at the same
+// path while installation was in flight.
+fn install_attributes(
+    baseline: &Arc<RepositoryBaseline>,
+    signals: &Arc<Signals>,
+    anchors: &mut Vec<PathBuf>,
+) -> Result<Option<RecommendedWatcher>, String> {
+    let mut directories = attribute_directories(baseline, anchors)?;
+    if anchors.is_empty() {
+        anchors.extend(directories.keys().cloned());
+    }
+    while !directories.is_empty() && !signals.stopped.load(Ordering::Acquire) {
+        let mut watcher = new_watcher(baseline, signals)?;
+        let mut missing = false;
+        for path in directories.keys() {
+            if let Err(error) = watcher.watch(path, RecursiveMode::NonRecursive) {
+                if matches!(&error.kind, notify::ErrorKind::PathNotFound)
+                    || matches!(
+                        &error.kind,
+                        notify::ErrorKind::Io(error)
+                            if error.kind() == std::io::ErrorKind::NotFound
+                    )
+                {
+                    missing = true;
+                    break;
+                }
+                return Err(format!("Cannot watch {}: {error}", path.display()));
+            }
+        }
+        let current = attribute_directories(baseline, anchors)?;
+        if !missing && directories == current {
+            return Ok(Some(watcher));
+        }
+        // A missing directory may have appeared before its ancestor was
+        // subscribed. Move closer now, even if no callback covered that gap.
+        directories = current;
+    }
+    Ok(None)
+}
+
+impl BlockingWatcher {
+    async fn rearm(
+        &mut self,
+        baseline: Arc<RepositoryBaseline>,
+        signals: Arc<Signals>,
+    ) -> Result<(), String> {
+        let Some(mut watchers) = self.0.take() else {
+            return Ok(());
+        };
+        let (replacement, result) = tokio::task::spawn_blocking(move || {
+            let result = install_attributes(&baseline, &signals, &mut watchers.attribute_anchors)
+                .map(|attributes| {
+                    watchers.attributes = attributes;
+                });
+            (BlockingWatcher(Some(watchers)), result)
+        })
+        .await
+        .map_err(|error| format!("Cannot update repository monitor: {error}"))?;
+        *self = replacement;
+        result
+    }
+}
 
 impl Drop for BlockingWatcher {
     fn drop(&mut self) {
@@ -167,6 +339,7 @@ impl RepositoryWatch {
         let signals = Arc::new(Signals {
             sender,
             force: AtomicBool::new(false),
+            rearm: AtomicBool::new(false),
             stopped: AtomicBool::new(false),
             error: Mutex::new(None),
         });
@@ -223,18 +396,19 @@ async fn install(
     signals: Arc<Signals>,
 ) -> Result<BlockingWatcher, String> {
     tokio::task::spawn_blocking(move || {
-        let callback_baseline = Arc::clone(&baseline);
-        let mut watcher = RecommendedWatcher::new(
-            move |event| signals.event(&callback_baseline, event),
-            Config::default().with_follow_symlinks(false),
-        )
-        .map_err(|error| format!("Cannot watch repository: {error}"))?;
+        let mut watcher = new_watcher(&baseline, &signals)?;
         for path in baseline.watch_paths() {
             watcher
                 .watch(path, RecursiveMode::Recursive)
                 .map_err(|error| format!("Cannot watch {}: {error}", path.display()))?;
         }
-        Ok(BlockingWatcher(Some(watcher)))
+        let mut attribute_anchors = Vec::new();
+        let attributes = install_attributes(&baseline, &signals, &mut attribute_anchors)?;
+        Ok(BlockingWatcher(Some(Watchers {
+            _repository: watcher,
+            attributes,
+            attribute_anchors,
+        })))
     })
     .await
     .map_err(|error| format!("Cannot start repository monitor: {error}"))?
@@ -305,7 +479,7 @@ async fn run_watch(
             None
         }
     };
-    let _watcher = if let Some(baseline) = &baseline {
+    let mut watcher = if let Some(baseline) = &baseline {
         match install(Arc::clone(baseline), Arc::clone(&signals)).await {
             Ok(watcher) => Some(watcher),
             Err(error) => {
@@ -358,6 +532,18 @@ async fn run_watch(
         // inspect the source and report errors (e.g. a moved/disconnected repo).
         if explicit || (!status.changed && status.error.is_none()) {
             if let Some(baseline) = &baseline {
+                if signals.rearm.swap(false, Ordering::AcqRel) || explicit {
+                    if let Some(watcher) = &mut watcher {
+                        if let Err(error) = watcher
+                            .rearm(Arc::clone(baseline), Arc::clone(&signals))
+                            .await
+                        {
+                            merge(&mut status, Err(error));
+                        }
+                    }
+                }
+                // Re-arm first, then probe: changes during subscription cannot
+                // leave a clean baseline with stale directory coverage.
                 let result = probe(
                     probes.run(&signals, || {
                         let baseline = Arc::clone(baseline);
@@ -394,6 +580,7 @@ mod tests {
             Arc::new(Signals {
                 sender,
                 force: AtomicBool::new(false),
+                rearm: AtomicBool::new(false),
                 stopped: AtomicBool::new(false),
                 error: Mutex::new(None),
             }),
@@ -612,10 +799,16 @@ mod tests {
             .output()
             .unwrap();
         assert!(output.status.success());
+        #[cfg(unix)]
+        let attribute_fixture = attributes::Fixture::new();
+        #[cfg(unix)]
+        let git_path = attribute_fixture.git.to_str();
+        #[cfg(not(unix))]
+        let git_path = None;
         let snapshot = peer_core::repository::create_snapshot(
             root.path().to_str().unwrap(),
             peer_core::Comparison::default(),
-            None,
+            git_path,
             &std::collections::BTreeMap::new(),
         )
         .await
@@ -706,5 +899,327 @@ mod tests {
         merge(&mut status, Ok(false));
         assert!(status.changed);
         assert_eq!(status.error.as_deref(), Some("repository disconnected"));
+    }
+
+    #[cfg(unix)]
+    mod attributes {
+        use super::*;
+        use std::{fs, os::unix::fs::PermissionsExt, process::Command};
+
+        pub(super) struct Fixture {
+            _temp: tempfile::TempDir,
+            root: PathBuf,
+            repository: PathBuf,
+            attributes: PathBuf,
+            pub(super) git: PathBuf,
+        }
+
+        impl Fixture {
+            pub(super) fn new() -> Self {
+                let temp = tempfile::tempdir().unwrap();
+                let root = temp.path().canonicalize().unwrap();
+                let repository = root.join("repository");
+                fs::create_dir(&repository).unwrap();
+                let git = root.join("git-fixture");
+                // Environment belongs to this child only, never the test
+                // process. Neither Git config nor attributes use user files.
+                fs::write(
+                    &git,
+                    "#!/bin/sh\n\
+                     fixture=$(dirname \"$0\")\n\
+                     export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null\n\
+                     export GIT_CONFIG_SYSTEM=/dev/null GIT_ATTR_NOSYSTEM=1\n\
+                     exec git -c core.attributesFile=\"$fixture/external/config/git/attributes\" \"$@\"\n",
+                )
+                .unwrap();
+                fs::set_permissions(&git, fs::Permissions::from_mode(0o755)).unwrap();
+                let output = Command::new(&git)
+                    .args(["init", "-b", "main"])
+                    .current_dir(&repository)
+                    .output()
+                    .unwrap();
+                assert!(
+                    output.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                Self {
+                    _temp: temp,
+                    attributes: root.join("external/config/git/attributes"),
+                    root,
+                    repository,
+                    git,
+                }
+            }
+
+            async fn baseline(&self) -> Arc<RepositoryBaseline> {
+                peer_core::repository::create_snapshot(
+                    self.repository.to_str().unwrap(),
+                    peer_core::Comparison::default(),
+                    self.git.to_str(),
+                    &BTreeMap::new(),
+                )
+                .await
+                .unwrap()
+                .repository_watch
+                .unwrap()
+                .unwrap()
+            }
+
+            fn atomic_write(&self, contents: &str) {
+                let temporary = self.attributes.with_file_name("attributes-new");
+                fs::write(&temporary, contents).unwrap();
+                fs::rename(temporary, &self.attributes).unwrap();
+            }
+        }
+
+        async fn hint(receiver: &mut mpsc::Receiver<()>, signals: &Signals, mutation: &str) {
+            assert_eq!(
+                tokio::time::timeout(Duration::from_secs(10), next_probe(receiver, signals))
+                    .await
+                    .unwrap_or_else(|_| panic!("{mutation} produced no native notification")),
+                Some(false)
+            );
+            assert!(signals.error.lock().is_none());
+        }
+
+        async fn quiet(receiver: &mut mpsc::Receiver<()>, signals: &Signals) {
+            // Drain late OS batches before the next mutation, so it cannot pass
+            // by consuming a stale hint from the preceding operation.
+            while tokio::time::timeout(MAX_DELAY, next_probe(receiver, signals))
+                .await
+                .is_ok()
+            {}
+            signals.rearm.store(false, Ordering::Release);
+        }
+
+        #[tokio::test]
+        async fn subscriptions_are_narrow_and_sibling_hints_do_not_rearm_or_probe() {
+            let fixture = Fixture::new();
+            let baseline = fixture.baseline().await;
+            let directories = attribute_directories(&baseline, &[]).unwrap();
+            assert_eq!(directories.len(), 2);
+            assert!(directories.contains_key(&fixture.root));
+            assert!(directories.contains_key(fixture.root.parent().unwrap()));
+            let (signals, mut receiver) = signals();
+            signals.event(
+                &baseline,
+                Ok(Event::new(EventKind::Any).add_path(fixture.root.join("unrelated"))),
+            );
+            assert!(receiver.try_recv().is_err());
+            assert!(!signals.rearm.load(Ordering::Acquire));
+            signals.event(
+                &baseline,
+                Ok(Event::new(EventKind::Any).add_path(fixture.attributes.clone())),
+            );
+            assert_eq!(receiver.try_recv(), Ok(()));
+            assert!(!signals.rearm.load(Ordering::Acquire));
+            signals.event(
+                &baseline,
+                Ok(Event::new(EventKind::Any).add_path(fixture.root.join("external"))),
+            );
+            assert_eq!(receiver.try_recv(), Ok(()));
+            assert!(signals.rearm.swap(false, Ordering::AcqRel));
+
+            fs::create_dir_all(fixture.attributes.parent().unwrap()).unwrap();
+            let directories = attribute_directories(&baseline, &[]).unwrap();
+            assert_eq!(directories.len(), 2);
+            assert!(directories.contains_key(fixture.attributes.parent().unwrap()));
+            assert!(directories.contains_key(&fixture.root.join("external/config")));
+            assert!(!directories.contains_key(&fixture.root));
+            let watcher = install(Arc::clone(&baseline), Arc::clone(&signals))
+                .await
+                .unwrap();
+            quiet(&mut receiver, &signals).await;
+            fs::write(
+                fixture.attributes.with_file_name("unrelated"),
+                "not an attribute file",
+            )
+            .unwrap();
+            assert!(
+                tokio::time::timeout(MAX_DELAY * 2, next_probe(&mut receiver, &signals))
+                    .await
+                    .is_err(),
+                "unrelated sibling traffic scheduled a repository probe"
+            );
+            assert!(!signals.rearm.load(Ordering::Acquire));
+            signals.stopped.store(true, Ordering::Release);
+            drop(watcher);
+        }
+
+        #[tokio::test]
+        async fn activation_probes_changes_before_install_and_covers_the_new_parent() {
+            let fixture = Fixture::new();
+            let baseline = fixture.baseline().await;
+            fs::create_dir_all(fixture.attributes.parent().unwrap()).unwrap();
+            fixture.atomic_write("*.txt text\n");
+            let (signals, mut receiver) = signals();
+            let watcher = install(Arc::clone(&baseline), Arc::clone(&signals))
+                .await
+                .unwrap();
+            // No event could report the write before installation. The
+            // mandatory post-install probe still observes it.
+            assert!(baseline.probe().await.unwrap());
+            let current = fixture.baseline().await;
+            quiet(&mut receiver, &signals).await;
+            fixture.atomic_write("*.txt binary\n");
+            hint(
+                &mut receiver,
+                &signals,
+                "changing attributes after activation",
+            )
+            .await;
+            assert!(current.probe().await.unwrap());
+            signals.stopped.store(true, Ordering::Release);
+            drop(watcher);
+        }
+
+        #[tokio::test]
+        async fn real_notify_follows_missing_parents_and_tree_deletion_recreation() {
+            let fixture = Fixture::new();
+            let baseline = fixture.baseline().await;
+            let (signals, mut receiver) = signals();
+            let mut watcher = install(Arc::clone(&baseline), Arc::clone(&signals))
+                .await
+                .unwrap();
+            assert!(!baseline.probe().await.unwrap());
+            quiet(&mut receiver, &signals).await;
+
+            for relative in ["external", "external/config", "external/config/git"] {
+                let directory = fixture.root.join(relative);
+                fs::create_dir(&directory).unwrap();
+                hint(&mut receiver, &signals, relative).await;
+                assert!(signals.rearm.swap(false, Ordering::AcqRel));
+                watcher
+                    .rearm(Arc::clone(&baseline), Arc::clone(&signals))
+                    .await
+                    .unwrap();
+                assert!(!baseline.probe().await.unwrap());
+                let directories = attribute_directories(
+                    &baseline,
+                    &watcher.0.as_ref().unwrap().attribute_anchors,
+                )
+                .unwrap();
+                assert!(directories.contains_key(&directory));
+                quiet(&mut receiver, &signals).await;
+            }
+            fixture.atomic_write("*.txt text\n");
+            hint(&mut receiver, &signals, "creating attributes").await;
+            assert!(baseline.probe().await.unwrap());
+            let present = fixture.baseline().await;
+            quiet(&mut receiver, &signals).await;
+            fs::remove_file(&fixture.attributes).unwrap();
+            hint(&mut receiver, &signals, "deleting attributes").await;
+            assert!(present.probe().await.unwrap());
+            assert!(!baseline.probe().await.unwrap());
+            quiet(&mut receiver, &signals).await;
+
+            fs::remove_dir_all(fixture.root.join("external")).unwrap();
+            hint(&mut receiver, &signals, "removing attribute directory tree").await;
+            assert!(signals.rearm.swap(false, Ordering::AcqRel));
+            watcher
+                .rearm(Arc::clone(&baseline), Arc::clone(&signals))
+                .await
+                .unwrap();
+            assert!(!baseline.probe().await.unwrap());
+            assert!(attribute_directories(
+                &baseline,
+                &watcher.0.as_ref().unwrap().attribute_anchors
+            )
+            .unwrap()
+            .contains_key(&fixture.root));
+            quiet(&mut receiver, &signals).await;
+            fs::create_dir_all(fixture.attributes.parent().unwrap()).unwrap();
+            hint(
+                &mut receiver,
+                &signals,
+                "recreating attribute directory tree",
+            )
+            .await;
+            watcher
+                .rearm(Arc::clone(&baseline), Arc::clone(&signals))
+                .await
+                .unwrap();
+            assert!(!baseline.probe().await.unwrap());
+            quiet(&mut receiver, &signals).await;
+            fixture.atomic_write("*.txt binary\n");
+            hint(
+                &mut receiver,
+                &signals,
+                "editing attributes after tree recreation",
+            )
+            .await;
+            assert!(baseline.probe().await.unwrap());
+            signals.stopped.store(true, Ordering::Release);
+            drop(watcher);
+        }
+
+        #[tokio::test]
+        async fn real_notify_retains_atomic_save_coverage_after_parent_replacement() {
+            let fixture = Fixture::new();
+            fs::create_dir_all(fixture.attributes.parent().unwrap()).unwrap();
+            fixture.atomic_write("*.txt text\n");
+            let baseline = fixture.baseline().await;
+            let (signals, mut receiver) = signals();
+            let mut watcher = install(Arc::clone(&baseline), Arc::clone(&signals))
+                .await
+                .unwrap();
+            assert!(!baseline.probe().await.unwrap());
+            quiet(&mut receiver, &signals).await;
+
+            for _ in 0..3 {
+                let parent = fixture.attributes.parent().unwrap();
+                let retired = parent.with_file_name("retired");
+                fs::rename(parent, &retired).unwrap();
+                fs::create_dir(parent).unwrap();
+                fixture.atomic_write("*.txt text\n");
+                hint(&mut receiver, &signals, "replacing attribute parent").await;
+                assert!(signals.rearm.swap(false, Ordering::AcqRel));
+                watcher
+                    .rearm(Arc::clone(&baseline), Arc::clone(&signals))
+                    .await
+                    .unwrap();
+                assert!(!baseline.probe().await.unwrap());
+                assert_eq!(
+                    attribute_directories(
+                        &baseline,
+                        &watcher.0.as_ref().unwrap().attribute_anchors
+                    )
+                    .unwrap()
+                    .len(),
+                    2,
+                );
+                fs::remove_dir_all(retired).unwrap();
+                quiet(&mut receiver, &signals).await;
+                fixture.atomic_write("*.txt text\n");
+                hint(
+                    &mut receiver,
+                    &signals,
+                    "atomic save after parent replacement",
+                )
+                .await;
+                assert!(!baseline.probe().await.unwrap());
+                quiet(&mut receiver, &signals).await;
+            }
+            fixture.atomic_write("*.txt binary\n");
+            hint(
+                &mut receiver,
+                &signals,
+                "changing attributes after parent replacements",
+            )
+            .await;
+            assert!(baseline.probe().await.unwrap());
+            quiet(&mut receiver, &signals).await;
+            signals.stopped.store(true, Ordering::Release);
+            watcher
+                .rearm(Arc::clone(&baseline), Arc::clone(&signals))
+                .await
+                .unwrap();
+            assert!(watcher.0.as_ref().unwrap().attributes.is_none());
+            fixture.atomic_write("*.txt text\n");
+            assert!(tokio::time::timeout(MAX_DELAY, receiver.recv())
+                .await
+                .is_err());
+        }
     }
 }

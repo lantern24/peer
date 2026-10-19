@@ -96,6 +96,10 @@ async function refresh() {
   await $(refreshButton).waitForEnabled();
   await $(".refresh-overlay").waitForExist({ reverse: true });
 }
+async function expectDiffCounts(additions: number, deletions: number) {
+  await expect($(".diff-summary .add")).toHaveText(`+${additions}`);
+  await expect($(".diff-summary .remove")).toHaveText(`−${deletions}`);
+}
 async function focusProbe(): Promise<RepositoryWatchStatus> {
   // Await a real native probe acknowledgement, rather than sleeping and assuming
   // absence of a notice proves ignored changes were processed.
@@ -338,6 +342,113 @@ describe("Repository change notifications", () => {
     await expect($('.tree-file[title="dependency"]')).not.toExist();
     await refresh();
     await $('.tree-file[title="dependency"]').waitForExist();
+  });
+
+  it("notifies about repository attributes without replacing an active review or draft", async () => {
+    const attributes = join(repo, ".git", "info", "attributes");
+    const index = readFileSync(join(repo, ".git", "index"));
+    await clickInPlace(`[aria-label="Comment on file ${file}"]`);
+    await $('[aria-label="Comment text"]').setValue(
+      "Keep this attribute review draft",
+    );
+
+    writeFileSync(attributes, `${file} binary\n`);
+    await $(notice).waitForExist();
+    expect(await renderedSource()).toContain("Current line");
+    await expectDiffCounts(80, 80);
+    await expect($('[aria-label="Comment text"]')).toHaveValue(
+      "Keep this attribute review draft",
+    );
+    expect(readFileSync(join(repo, ".git", "index"))).toEqual(index);
+    await browser.saveScreenshot(
+      resolve("test-results/repository-attributes-notice.png"),
+    );
+    await refresh();
+    await expectDiffCounts(0, 0);
+    await expect($('[aria-label="Comment text"]')).toHaveValue(
+      "Keep this attribute review draft",
+    );
+    expect((await focusProbe()).changed).toBe(false);
+    await expect($(notice)).not.toExist();
+
+    rmSync(attributes);
+    await $(notice).waitForExist();
+    await expectDiffCounts(0, 0);
+    await refresh();
+    await readySource("Current line");
+    await expectDiffCounts(80, 80);
+  });
+
+  it("watches external attributes through atomic saves, deletion, and recreation", async () => {
+    const directory = join(workspace, "external-attributes");
+    mkdirSync(directory);
+    const attributes = join(directory, "attributes");
+    writeFileSync(attributes, `${file} text\n`);
+    git(repo, "config", "core.attributesFile", attributes);
+    await refresh();
+    expect((await focusProbe()).changed).toBe(false);
+    await expectDiffCounts(80, 80);
+    const index = readFileSync(join(repo, ".git", "index"));
+
+    const replacement = join(directory, "attributes.next");
+    writeFileSync(replacement, `${file} binary\n`);
+    renameSync(replacement, attributes);
+    await $(notice).waitForExist();
+    expect(await renderedSource()).toContain("Current line");
+    await expectDiffCounts(80, 80);
+    expect(readFileSync(join(repo, ".git", "index"))).toEqual(index);
+    await refresh();
+    await expectDiffCounts(0, 0);
+    expect((await focusProbe()).changed).toBe(false);
+
+    writeFileSync(attributes, `${file} binary\n`);
+    writeFileSync(join(directory, "unrelated-output"), "Sibling noise\n");
+    expect((await focusProbe()).changed).toBe(false);
+    await expect($(notice)).not.toExist();
+    rmSync(attributes);
+    await $(notice).waitForExist();
+    await expectDiffCounts(0, 0);
+    await refresh();
+    await readySource("Current line");
+    await expectDiffCounts(80, 80);
+    expect((await focusProbe()).changed).toBe(false);
+
+    writeFileSync(attributes, `${file} binary\n`);
+    await $(notice).waitForExist();
+    expect(await renderedSource()).toContain("Current line");
+    await refresh();
+    await expectDiffCounts(0, 0);
+  });
+
+  it("detects external attributes created below initially missing directories", async () => {
+    const directory = join(workspace, "new-attributes", "nested");
+    const attributes = join(directory, "attributes");
+    git(repo, "config", "core.attributesFile", attributes);
+    await refresh();
+    const initial = await focusProbe();
+    expect(initial.changed).toBe(false);
+    expect(initial.error).toBeNull();
+
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(attributes, `${file} binary\n`);
+    await $(notice).waitForExist();
+    expect(await renderedSource()).toContain("Current line");
+    await expectDiffCounts(80, 80);
+    await refresh();
+    await expectDiffCounts(0, 0);
+    expect((await focusProbe()).changed).toBe(false);
+
+    rmSync(join(workspace, "new-attributes"), { recursive: true });
+    await $(notice).waitForExist();
+    await refresh();
+    await readySource("Current line");
+    await expectDiffCounts(80, 80);
+    expect((await focusProbe()).changed).toBe(false);
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(attributes, `${file} binary\n`);
+    await $(notice).waitForExist();
+    await refresh();
+    await expectDiffCounts(0, 0);
   });
 
   it("notifies when Git configuration alone changes the comparison", async () => {

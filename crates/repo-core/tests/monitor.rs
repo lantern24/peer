@@ -46,9 +46,20 @@ fn fixture() -> tempfile::TempDir {
 }
 
 async fn snapshot(root: &Path, comparison: Comparison) -> repository::RepositorySnapshot {
-    repository::create_snapshot(root.to_str().unwrap(), comparison, None, &BTreeMap::new())
-        .await
-        .unwrap()
+    #[cfg(unix)]
+    let executable = isolated_fixture_git(root);
+    #[cfg(unix)]
+    let executable = executable.to_str();
+    #[cfg(not(unix))]
+    let executable = None;
+    repository::create_snapshot(
+        root.to_str().unwrap(),
+        comparison,
+        executable,
+        &BTreeMap::new(),
+    )
+    .await
+    .unwrap()
 }
 
 async fn baseline(root: &Path) -> Arc<RepositoryBaseline> {
@@ -90,6 +101,13 @@ async fn submodule_source_and_head_changes_refresh_comparison_without_probe_writ
     let module = root.path().join("module");
     let data = tempfile::tempdir().unwrap();
     let inspector = Inspector::new(data.path()).unwrap();
+    #[cfg(unix)]
+    inspector
+        .save_preferences(peer_core::Preferences {
+            git_executable: Some(isolated_fixture_git(root.path()).to_str().unwrap().into()),
+            ..Default::default()
+        })
+        .unwrap();
     let initial = inspector
         .open_repository(root.path().to_str().unwrap(), Some(Comparison::default()))
         .await
@@ -676,6 +694,13 @@ async fn baseline_survives_activation_delay_without_mutating_store_or_replacing_
     let root = fixture();
     let data = tempfile::tempdir().unwrap();
     let inspector = Inspector::new(data.path()).unwrap();
+    #[cfg(unix)]
+    inspector
+        .save_preferences(peer_core::Preferences {
+            git_executable: Some(isolated_fixture_git(root.path()).to_str().unwrap().into()),
+            ..Default::default()
+        })
+        .unwrap();
     let snapshot = inspector
         .open_repository(root.path().to_str().unwrap(), Some(Comparison::default()))
         .await
@@ -770,8 +795,8 @@ async fn snapshot_rejects_source_and_inventory_changes_during_initial_capture() 
     use std::os::unix::fs::PermissionsExt;
     let root = fixture();
     let wrapper = root.path().join(".git/monitor-git");
-    let real_git = repository::discover_git(None);
-    let quoted_git = format!("'{}'", real_git.replace('\'', "'\\''"));
+    let real_git = isolated_fixture_git(root.path());
+    let quoted_git = format!("'{}'", real_git.to_str().unwrap().replace('\'', "'\\''"));
     fs::write(&wrapper, format!(
         "#!/bin/sh\ncase \" $* \" in\n*' ls-files --stage -z '*)\n  if [ -f .git/monitor-pending ]; then\n    rm .git/monitor-pending\n    printf 'changed during opening\\n' > source.txt\n    printf 'new during opening\\n' > new.txt\n  fi\n  ;;\nesac\nexec {quoted_git} \"$@\"\n"
     )).unwrap();
@@ -794,4 +819,454 @@ async fn snapshot_rejects_source_and_inventory_changes_during_initial_capture() 
         .probe()
         .await
         .unwrap());
+}
+
+// Keep HOME/XDG/system attributes and configuration process-local: these tests
+// must never inspect the developer's global attributes or mutate suite-wide env.
+#[cfg(unix)]
+fn attribute_git(directory: &Path) -> std::path::PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let directory = directory.canonicalize().unwrap();
+    fs::create_dir_all(directory.join("home")).unwrap();
+    fs::create_dir_all(directory.join("xdg")).unwrap();
+    let quote = |path: &Path| format!("'{}'", path.to_str().unwrap().replace('\'', "'\\''"));
+    let wrapper = directory.join("git");
+    let real_git = repository::discover_git(None);
+    fs::write(
+        &wrapper,
+        format!(
+            "#!/bin/sh\nexport HOME={}\nexport XDG_CONFIG_HOME={}\nexport GIT_CONFIG_GLOBAL=/dev/null\nexport GIT_CONFIG_NOSYSTEM=1\nexport GIT_ATTR_NOSYSTEM=1\nexec {} \"$@\"\n",
+            quote(&directory.join("home")),
+            quote(&directory.join("xdg")),
+            quote(Path::new(&real_git)),
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&wrapper, fs::Permissions::from_mode(0o755)).unwrap();
+    wrapper
+}
+
+#[cfg(unix)]
+fn isolated_fixture_git(root: &Path) -> std::path::PathBuf {
+    let common = git(
+        root,
+        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    );
+    let directory = Path::new(&common).join("monitor-environment");
+    fs::create_dir_all(&directory).unwrap();
+    attribute_git(&directory)
+}
+
+#[cfg(unix)]
+async fn attribute_snapshot(root: &Path, git: &Path) -> repository::RepositorySnapshot {
+    repository::create_snapshot(
+        root.to_str().unwrap(),
+        Comparison::default(),
+        git.to_str(),
+        &BTreeMap::new(),
+    )
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn attribute_contents_change_comparison_without_mutating_review_or_repository() {
+    for external in [false, true] {
+        let root = fixture();
+        let environment = tempfile::tempdir().unwrap();
+        #[cfg(unix)]
+        let wrapper = Some(attribute_git(environment.path()));
+        #[cfg(not(unix))]
+        let wrapper: Option<std::path::PathBuf> = None;
+        let attributes = if external {
+            let path = environment.path().join("external-attributes");
+            git(
+                root.path(),
+                &["config", "core.attributesFile", path.to_str().unwrap()],
+            );
+            path
+        } else {
+            git(
+                root.path(),
+                &[
+                    "config",
+                    "core.attributesFile",
+                    environment.path().join("unused-global").to_str().unwrap(),
+                ],
+            );
+            root.path().join(".git/info/attributes")
+        };
+        fs::write(&attributes, "source.txt diff\n").unwrap();
+        fs::write(root.path().join("source.txt"), "modified\n").unwrap();
+        let data = tempfile::tempdir().unwrap();
+        let inspector = Inspector::new(data.path()).unwrap();
+        inspector
+            .save_preferences(peer_core::Preferences {
+                git_executable: wrapper
+                    .as_ref()
+                    .map(|path| path.to_str().unwrap().to_owned()),
+                ..Default::default()
+            })
+            .unwrap();
+        let opened = inspector
+            .open_repository(root.path().to_str().unwrap(), Some(Comparison::default()))
+            .await
+            .unwrap();
+        let entry = opened
+            .files
+            .iter()
+            .find(|file| file.path == "source.txt")
+            .unwrap();
+        assert_eq!(entry.kind, "text");
+        assert_eq!((entry.additions, entry.deletions), (1, 1));
+        let baseline = inspector
+            .repository_watch_baseline(&opened.id)
+            .await
+            .unwrap()
+            .unwrap();
+        let stored = fs::read(data.path().join("state.json")).unwrap();
+        let index = fs::read(root.path().join(".git/index")).unwrap();
+        let config = fs::read(root.path().join(".git/config")).unwrap();
+        let source = fs::read(root.path().join("source.txt")).unwrap();
+        assert!(!baseline.probe().await.unwrap());
+        fs::write(&attributes, "source.txt -diff\n").unwrap();
+        assert!(baseline.probe().await.unwrap());
+        assert_eq!(stored, fs::read(data.path().join("state.json")).unwrap());
+        assert_eq!(index, fs::read(root.path().join(".git/index")).unwrap());
+        assert_eq!(config, fs::read(root.path().join(".git/config")).unwrap());
+        assert_eq!(source, fs::read(root.path().join("source.txt")).unwrap());
+        assert_eq!(entry.kind, "text");
+        let refreshed = inspector
+            .open_repository(root.path().to_str().unwrap(), Some(Comparison::default()))
+            .await
+            .unwrap();
+        let entry = refreshed
+            .files
+            .iter()
+            .find(|file| file.path == "source.txt")
+            .unwrap();
+        assert_eq!(entry.kind, "binary");
+        assert_eq!((entry.additions, entry.deletions), (0, 0));
+        let current = inspector
+            .repository_watch_baseline(&refreshed.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(!current.probe().await.unwrap());
+        assert_eq!(index, fs::read(root.path().join(".git/index")).unwrap());
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn attribute_hashes_ignore_metadata_but_detect_same_size_restored_mtime_edits() {
+    let root = fixture();
+    let environment = tempfile::tempdir().unwrap();
+    let wrapper = attribute_git(environment.path());
+    let attributes = root.path().join(".git/info/attributes");
+    fs::write(&attributes, "source.txt diff \n").unwrap();
+    let baseline = attribute_snapshot(root.path(), &wrapper)
+        .await
+        .repository_watch
+        .unwrap()
+        .unwrap();
+    let modified = fs::metadata(&attributes).unwrap().modified().unwrap();
+    fs::write(&attributes, "source.txt diff \n").unwrap();
+    fs::File::open(&attributes)
+        .unwrap()
+        .set_times(fs::FileTimes::new().set_modified(modified + Duration::from_secs(10)))
+        .unwrap();
+    assert!(!baseline.probe().await.unwrap());
+    let replacement = attributes.with_extension("replacement");
+    fs::write(&replacement, "source.txt diff \n").unwrap();
+    fs::rename(&replacement, &attributes).unwrap();
+    assert!(!baseline.probe().await.unwrap());
+    fs::write(&attributes, "source.txt -diff\n").unwrap();
+    fs::File::open(&attributes)
+        .unwrap()
+        .set_times(fs::FileTimes::new().set_modified(modified))
+        .unwrap();
+    assert!(baseline.probe().await.unwrap());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn absent_attributes_and_missing_parents_are_watched_without_sibling_noise() {
+    let root = fixture();
+    let environment = tempfile::tempdir().unwrap();
+    let wrapper = attribute_git(environment.path());
+    let attributes = environment
+        .path()
+        .canonicalize()
+        .unwrap()
+        .join("missing/nested/attributes");
+    git(
+        root.path(),
+        &[
+            "config",
+            "core.attributesFile",
+            attributes.to_str().unwrap(),
+        ],
+    );
+    let absent = attribute_snapshot(root.path(), &wrapper)
+        .await
+        .repository_watch
+        .unwrap()
+        .unwrap();
+    assert!(!absent.probe().await.unwrap());
+    assert!(absent.attribute_paths().any(|path| path == attributes));
+    assert!(absent.relevant_event_path(attributes.parent().unwrap()));
+    assert!(absent.relevant_event_path(attributes.parent().unwrap().parent().unwrap()));
+    assert!(
+        !absent.relevant_event_path(&environment.path().canonicalize().unwrap().join("sibling"))
+    );
+    assert!(!absent
+        .watch_paths()
+        .iter()
+        .any(|path| attributes.starts_with(path)));
+    fs::create_dir_all(attributes.parent().unwrap()).unwrap();
+    assert!(!absent.probe().await.unwrap());
+    fs::write(&attributes, "source.txt -diff\n").unwrap();
+    assert!(absent.probe().await.unwrap());
+    let present = attribute_snapshot(root.path(), &wrapper)
+        .await
+        .repository_watch
+        .unwrap()
+        .unwrap();
+    fs::remove_file(&attributes).unwrap();
+    assert!(present.probe().await.unwrap());
+    assert!(!absent.probe().await.unwrap());
+    let info = root.path().join(".git/info/attributes");
+    fs::write(&info, "source.txt -diff\n").unwrap();
+    assert!(absent.probe().await.unwrap());
+    fs::remove_file(info).unwrap();
+    assert!(!absent.probe().await.unwrap());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn attribute_paths_preserve_missing_components_before_parent_traversal() {
+    let root = fixture();
+    let environment = tempfile::tempdir().unwrap();
+    let wrapper = attribute_git(environment.path());
+    fs::write(root.path().join("source.txt"), "modified\n").unwrap();
+    let attributes = root.path().join(".git/attributes");
+    fs::write(&attributes, "source.txt diff\n").unwrap();
+    git(
+        root.path(),
+        &[
+            "config",
+            "core.attributesFile",
+            ".git/missing/../attributes",
+        ],
+    );
+    let opened = attribute_snapshot(root.path(), &wrapper).await;
+    assert_eq!(
+        opened
+            .data
+            .files
+            .iter()
+            .find(|file| file.path == "source.txt")
+            .unwrap()
+            .kind,
+        "text"
+    );
+    let baseline = opened.repository_watch.unwrap().unwrap();
+    fs::write(&attributes, "source.txt -diff\n").unwrap();
+    assert!(!baseline.probe().await.unwrap());
+    fs::create_dir(root.path().join(".git/missing")).unwrap();
+    assert!(baseline.probe().await.unwrap());
+    let refreshed = attribute_snapshot(root.path(), &wrapper).await;
+    assert_eq!(
+        refreshed
+            .data
+            .files
+            .iter()
+            .find(|file| file.path == "source.txt")
+            .unwrap()
+            .kind,
+        "binary"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn attributes_follow_git_relative_tilde_and_xdg_paths_with_system_disabled() {
+    let root = fixture();
+    let environment = tempfile::tempdir().unwrap();
+    let wrapper = attribute_git(environment.path());
+    for (configured, path) in [
+        (None, environment.path().join("xdg/git/attributes")),
+        (
+            Some("~/attributes"),
+            environment.path().join("home/attributes"),
+        ),
+        (
+            Some(".git/relative-attributes"),
+            root.path().join(".git/relative-attributes"),
+        ),
+    ] {
+        if let Some(configured) = configured {
+            git(root.path(), &["config", "core.attributesFile", configured]);
+        }
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, "source.txt diff\n").unwrap();
+        let baseline = attribute_snapshot(root.path(), &wrapper)
+            .await
+            .repository_watch
+            .unwrap()
+            .unwrap();
+        let canonical = path.canonicalize().unwrap();
+        assert!(baseline
+            .attribute_paths()
+            .any(|candidate| candidate == canonical));
+        // All discovered targets are inside the isolated repository/environment;
+        // GIT_ATTR_NOSYSTEM must not produce a guessed installation path.
+        assert!(baseline.attribute_paths().all(|candidate| {
+            candidate.starts_with(root.path().canonicalize().unwrap())
+                || candidate.starts_with(environment.path().canonicalize().unwrap())
+        }));
+        fs::write(&path, "source.txt -diff\n").unwrap();
+        assert!(baseline.probe().await.unwrap());
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn linked_worktree_attributes_use_common_info_not_private_git_dir() {
+    let root = fixture();
+    let environment = tempfile::tempdir().unwrap();
+    let wrapper = attribute_git(environment.path());
+    let linked = environment.path().join("linked");
+    git(
+        root.path(),
+        &["worktree", "add", "-b", "linked", linked.to_str().unwrap()],
+    );
+    let attributes = root.path().join(".git/info/attributes");
+    fs::write(&attributes, "source.txt diff\n").unwrap();
+    fs::write(linked.join("source.txt"), "modified\n").unwrap();
+    let opened = attribute_snapshot(&linked, &wrapper).await;
+    let baseline = opened.repository_watch.unwrap().unwrap();
+    assert!(baseline
+        .attribute_paths()
+        .any(|path| path == attributes.canonicalize().unwrap()));
+    let private = std::path::PathBuf::from(git(&linked, &["rev-parse", "--absolute-git-dir"]));
+    fs::create_dir_all(private.join("info")).unwrap();
+    fs::write(private.join("info/attributes"), "source.txt -diff\n").unwrap();
+    assert!(!baseline.probe().await.unwrap());
+    fs::write(&attributes, "source.txt -diff\n").unwrap();
+    assert!(baseline.probe().await.unwrap());
+    let refreshed = attribute_snapshot(&linked, &wrapper).await;
+    assert_eq!(
+        refreshed
+            .data
+            .files
+            .iter()
+            .find(|file| file.path == "source.txt")
+            .unwrap()
+            .kind,
+        "binary"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn attribute_symlinks_watch_targets_and_detect_retargeting_and_dangling_creation() {
+    use std::os::unix::fs::symlink;
+    let root = fixture();
+    let environment = tempfile::tempdir().unwrap();
+    let wrapper = attribute_git(environment.path());
+    let first = environment.path().join("first");
+    let second = environment.path().join("second");
+    fs::write(&first, "source.txt diff\n").unwrap();
+    fs::write(&second, "source.txt diff\n").unwrap();
+    let attributes = root.path().join(".git/info/attributes");
+    symlink(&first, &attributes).unwrap();
+    let initial = attribute_snapshot(root.path(), &wrapper)
+        .await
+        .repository_watch
+        .unwrap()
+        .unwrap();
+    assert!(initial
+        .attribute_paths()
+        .any(|path| path == first.canonicalize().unwrap()));
+    assert!(initial.attribute_paths().any(|path| path
+        == root
+            .path()
+            .canonicalize()
+            .unwrap()
+            .join(".git/info/attributes")));
+    fs::write(&first, "source.txt -diff\n").unwrap();
+    assert!(initial.probe().await.unwrap());
+    fs::write(&first, "source.txt diff\n").unwrap();
+    assert!(!initial.probe().await.unwrap());
+    fs::remove_file(&attributes).unwrap();
+    symlink(&second, &attributes).unwrap();
+    assert!(initial.probe().await.unwrap());
+    fs::remove_file(&second).unwrap();
+    let dangling = attribute_snapshot(root.path(), &wrapper)
+        .await
+        .repository_watch
+        .unwrap()
+        .unwrap();
+    assert!(!dangling.probe().await.unwrap());
+    let target = environment.path().canonicalize().unwrap().join("second");
+    assert!(dangling.attribute_paths().any(|path| path == target));
+    fs::write(&second, "source.txt -diff\n").unwrap();
+    assert!(dangling.probe().await.unwrap());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn invalid_attribute_file_types_are_probe_errors_not_clean_results() {
+    let root = fixture();
+    let environment = tempfile::tempdir().unwrap();
+    let wrapper = attribute_git(environment.path());
+    let attributes = root.path().join(".git/info/attributes");
+    let baseline = attribute_snapshot(root.path(), &wrapper)
+        .await
+        .repository_watch
+        .unwrap()
+        .unwrap();
+    fs::create_dir(&attributes).unwrap();
+    assert!(baseline
+        .probe()
+        .await
+        .unwrap_err()
+        .contains("not a regular file"));
+    fs::remove_dir(&attributes).unwrap();
+    assert!(Command::new("mkfifo")
+        .arg(&attributes)
+        .status()
+        .unwrap()
+        .success());
+    assert!(baseline
+        .probe()
+        .await
+        .unwrap_err()
+        .contains("not a regular file"));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn unsupported_git_attribute_discovery_disables_monitoring_without_path_guesses() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = fixture();
+    let environment = tempfile::tempdir().unwrap();
+    let isolated = attribute_git(environment.path());
+    let wrapper = environment.path().join("old-git");
+    fs::write(
+        &wrapper,
+        format!(
+            "#!/bin/sh\ncase \" $* \" in\n*' var GIT_ATTR_'*) printf 'usage: git var\\n' >&2; exit 129;;\nesac\nexec '{}' \"$@\"\n",
+            isolated.to_str().unwrap().replace('\'', "'\\''"),
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&wrapper, fs::Permissions::from_mode(0o755)).unwrap();
+    let opened = attribute_snapshot(root.path(), &wrapper).await;
+    assert!(opened
+        .repository_watch
+        .unwrap_err()
+        .contains("Git 2.42 or newer"));
 }
