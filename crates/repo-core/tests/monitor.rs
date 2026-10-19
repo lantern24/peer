@@ -254,7 +254,10 @@ async fn uninitialized_and_linked_worktree_submodules_remain_usable() {
     let initialized = baseline(&linked).await;
     assert!(!initialized.probe().await.unwrap());
     let module_git = git(&linked.join("module"), &["rev-parse", "--absolute-git-dir"]);
-    assert!(initialized.relevant_event_path(&Path::new(&module_git).join("HEAD")));
+    // Native events retain the canonical path supplied when installing a watch,
+    // including the extended-length prefix on Windows.
+    let module_git = fs::canonicalize(module_git).unwrap();
+    assert!(initialized.relevant_event_path(&module_git.join("HEAD")));
     fs::write(linked.join("module/source.txt"), "linked module edit\n").unwrap();
     assert!(initialized.probe().await.unwrap());
     assert!(snapshot(&linked, Comparison::default())
@@ -276,6 +279,9 @@ async fn effective_filemode_config_alone_changes_refreshed_comparison() {
     let source = root.path().join("source.txt");
     git(root.path(), &["config", "core.filemode", "false"]);
     fs::set_permissions(&source, fs::Permissions::from_mode(0o755)).unwrap();
+    // Complete fixture setup before capture: Git may otherwise refresh the
+    // chmod's index stat cache during Changes discovery on fast filesystems.
+    git(root.path(), &["update-index", "--refresh"]);
     let initial = snapshot(root.path(), Comparison::default()).await;
     assert!(!initial
         .data
@@ -335,6 +341,7 @@ async fn included_and_worktree_configuration_respects_effective_precedence() {
         fs::Permissions::from_mode(0o755),
     )
     .unwrap();
+    git(root.path(), &["update-index", "--refresh"]);
     let inherited = baseline(root.path()).await;
     fs::write(&included, "[core]\nfilemode = true\n").unwrap();
     assert!(inherited.probe().await.unwrap());
