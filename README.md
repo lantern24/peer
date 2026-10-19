@@ -147,7 +147,19 @@ Destinations open as complete, read-only source files, including files that are 
 
 Use **⌘+[** / **⌘+]** on macOS or **Alt+←** / **Alt+→** on Windows and Linux to go Back / Forward, matching Chrome. The toolbar Back and Forward buttons do the same; **Ctrl+-** remains available for Back. Navigation restores the file, source selection, scroll position, and diff expansion state. These shortcuts leave text fields and open dialogs untouched.
 
-Mouse **Back / Forward** side buttons use the same view history, including when the pointer is over source text. Peer also accepts the `BrowserBack` / `BrowserForward` keys emitted by some mouse drivers. On macOS, native horizontal swipe gestures—including Logi Options+’s Back / Forward assignments—navigate the same history; ordinary scrolling is unchanged. These controls do not navigate behind an open dialog or leave the Peer document at the ends of history. For per-app mouse assignments, use Back / Forward or the keyboard shortcuts above.
+**Mouse navigation and driver compatibility**
+
+Mouse **Back / Forward** controls use the same view history, including when the pointer is over source text. Support depends on the events a mouse or its driver sends, not its brand or model:
+
+- **Shared handling on macOS, Windows, and Linux:** [src/useNavigation.ts](src/useNavigation.ts) handles standard mouse Back / Forward button events and `BrowserBack` / `BrowserForward` key events delivered to the WebView. Mouse buttons mapped to the keyboard shortcuts above use the existing keyboard navigation path.
+- **Additional native handling on macOS:** [src-tauri/src/macos_navigation.rs](src-tauri/src/macos_navigation.rs) handles AppKit horizontal swipe events, such as Logi Options+’s Back / Forward gesture assignments. This module and its AppKit dependencies compile only on macOS. Ordinary scrolling is unchanged.
+- **Windows and Linux boundary:** there are no additional native mouse-driver command handlers for these platforms. A proprietary or OS-level command that does not reach the WebView as a supported mouse/key event will not trigger Peer’s view history.
+
+Mouse side buttons and native swipes do not navigate behind an open dialog or leave the Peer document at the ends of history. Keyboard mappings retain the text-field and dialog guards described above.
+
+**If a custom mapping does not work:** configure the assignment for Peer, not just for your browser. Start with Back / Forward; if the driver does not deliver a supported event, map the buttons to **⌘+[** / **⌘+]** on macOS or **Alt+←** / **Alt+→** on Windows/Linux.
+
+**Verification limits:** desktop regressions run in the macOS WebView using synthesized mouse/key events and native AppKit swipe injection. Windows/Linux keyboard mappings are emulated in that WebView, not tested on those operating systems. Mouse navigation has not been verified on actual Windows/Linux runtimes or physical mouse/driver combinations; these checks do not establish universal hardware compatibility.
 
 History includes file selection, quick-open, search results, line jumps, comment jumps, and symbol jumps. Navigating somewhere new after going Back clears Forward history. History holds up to 100 entries for the current comparison and resets on refresh, comparison changes (including switching Code/Changes), or opening another repository. Source pages retain the original feedback queue and drafts; comments and Reviewed actions remain in the review view. Find and Go to Line operate on the displayed source page.
 
