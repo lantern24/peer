@@ -88,7 +88,7 @@ After creating a release, the release workflow directly calls `.github/workflows
 
 Open a repository with the **+** button beside the repository name or ⌘/Ctrl O. Click the repository name to switch among the 12 most recently opened repositories; the dropdown shows their paths and marks the current one. Use arrow keys and Enter to choose, or Escape to close. The first opening shows Changes if any exist, otherwise Code. The app restores each repository's comparison, selected file, and scroll position, and keeps comment drafts while switching. Refresh with the toolbar or ⌘/Ctrl R after your agent edits files.
 
-For a renamed or moved repository, use its **Update location** folder icon in the dropdown, enter or browse to the new repository root, then choose **Update location**. Peer validates and opens the new location, replaces the old name/path, and preserves the saved view, comments, and Reviewed state. Invalid locations or locations already saved for another repository leave the original entry unchanged. This is an explicit repair, not automatic filesystem tracking.
+For a renamed or moved repository, use its **Update location** folder icon in the dropdown, enter or browse to the new repository root, then choose **Update location**. Peer validates and opens the new location, replaces the old name/path, and preserves the saved view, comments, and Reviewed state. Invalid locations or locations already saved for another repository leave the original entry unchanged. This is an explicit repair; Peer does not automatically locate moved repositories.
 
 For a deleted or unwanted repository, use its **Remove from list** × button. Removing the active entry returns to the welcome screen; other open repositories are unaffected. Removal persists across restarts but never deletes repository files or saved review data. In the dropdown, Up/Down moves between repositories and Left/Right reaches each row's location and removal actions.
 
@@ -111,6 +111,10 @@ Settings is organized into **Appearance**, **Viewer**, **Code navigation**, and 
 Use the gutter **+** to comment on a line, or a file header's comment button for a file comment. Comments can be edited, deleted individually, or cleared from the active queue. Changes files can be marked Reviewed. Feedback is stored per worktree and branch, with distinct Code and comparison queues.
 
 Refresh marks comments outdated when their file fingerprint changes, and resets Reviewed for changed files. Original anchors and context remain intact, including feedback on files that disappear. Drafts survive theme and view switching during the session; only saved comments survive application restarts.
+
+Peer watches the active repository and shows a persistent **Repository changed on disk** notice in the status bar when files, staging, HEAD, or the selected comparison branch change. Detection never refreshes automatically: displayed source, the file list, drafts, Reviewed state, focus, and scroll remain untouched. Choose the notice's **Refresh** button, the toolbar, or ⌘/Ctrl R when ready. The notice clears only after a successful reload; failed refreshes keep it.
+
+Monitoring includes tracked files (even those matching ignore rules), non-ignored untracked files, and linked worktrees. Ignored generated output and unrelated Git bookkeeping do not trigger a notice. Immutable commit reviews are not monitored for working-directory changes. If monitoring becomes unavailable, the status bar says so and manual refresh remains available. Existing stale-source checks still prevent attaching new feedback to changed content.
 
 The toolbar Refresh button and Refresh Repository menu command reload immediately. If files or Git's index change during that reload, Peer retries with a fresh snapshot (up to three attempts) before showing an error. Stale reads and review actions still offer a refresh without silently replacing the source being reviewed.
 
@@ -192,7 +196,7 @@ Diagnostics are recorded automatically in memory only, bounded to the latest 300
 
 ## Architecture and storage
 
-`crates/repo-core` implements Git discovery, comparisons, snapshot validation, comment/review services, export, preferences, and theme validation. It has no dependency on Tauri. `src-tauri` exposes typed commands and native menus/dialogs/clipboard. `src/Viewer.tsx` adapts `@pierre/diffs` with virtualized file/line rendering, a diff worker, and a Shiki worker pool. Syntax grammars and themes are packaged locally.
+`crates/repo-core` implements Git discovery, comparisons, snapshot validation, read-only change probes, comment/review services, export, preferences, and theme validation. It has no dependency on Tauri. `src-tauri` exposes typed commands, active-repository monitoring, and native menus/dialogs/clipboard. `src/Viewer.tsx` adapts `@pierre/diffs` with virtualized file/line rendering, a diff worker, and a Shiki worker pool. Syntax grammars and themes are packaged locally.
 
 The viewer uses one Shiki worker with the Oniguruma/WASM engine. File and diff highlighting share a 24 MiB estimated retained-data budget and a 12-result limit; refresh and view/repository switches clear cached results. Code source uses an 8 MiB / 8-file LRU, retaining the active file even if it exceeds the budget. Diff models retain full source lines for context expansion and stable scroll layout, without a second copy of the original source strings. The parser worker terminates after 15 seconds idle. These are cache budgets, not a cap on total WebView memory: active renderers, diff models, syntax grammars, and the JavaScript heap add overhead.
 
@@ -202,7 +206,9 @@ Git runs asynchronously with argument arrays, NUL-delimited path metadata, disab
 
 Snapshot IDs and source fingerprints prevent feedback from attaching to a different version. Saved comments retain their original anchors, Git revisions, timestamps, and code context internally. Copying or saving feedback exports only the relative filename, line number when applicable, and comment text, plus old-side/outdated markers when needed. Renamed files use their current comparison path.
 
-A future MCP adapter can instantiate the Rust `Inspector` against the same store. MCP transport, browser distribution, filesystem watching, Git history browsing, repository-wide text search, image comparison, and editing are not included.
+Repository monitoring compares Git-aware file metadata and logical index/revision state against a baseline captured during snapshot creation; it does not rebuild diffs or reconcile saved feedback. Native events share one pending rescan, with a 300 ms quiet period and a one-second maximum debounce window. An initial probe after watcher installation catches edits made before activation; focus/visibility checks and watcher overflow events request another probe. Snapshot/watch identities reject late events after switching repositories or refreshing.
+
+A future MCP adapter can instantiate the Rust `Inspector` against the same store. MCP transport, browser distribution, Git history browsing, repository-wide text search, image comparison, and editing are not included.
 
 ## Validation
 

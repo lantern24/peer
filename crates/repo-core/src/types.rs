@@ -91,6 +91,15 @@ pub struct Snapshot {
     pub files: Vec<FileEntry>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryWatchStatus {
+    pub snapshot_id: String,
+    pub watch_id: String,
+    pub changed: bool,
+    pub error: Option<String>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FileContent {

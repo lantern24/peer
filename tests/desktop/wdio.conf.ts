@@ -25,6 +25,7 @@ export const config = {
           "./repositories.spec.ts",
           "./history.spec.ts",
           "./diagnostics.spec.ts",
+          "./repository-watch.spec.ts",
         ]),
   ],
   maxInstances: 1,

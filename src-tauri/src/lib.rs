@@ -1,4 +1,5 @@
 mod diagnostics;
+mod repository_watch;
 
 use peer_core::navigation::{NavigationError, NavigationFile, NavigationRequest, NavigationResult};
 use peer_core::{types::*, Inspector};
@@ -46,6 +47,25 @@ async fn open_repository(
     comparison: Option<Comparison>,
 ) -> Result<Snapshot, String> {
     core.open_repository(&path, comparison).await
+}
+#[tauri::command]
+async fn start_repository_watch(
+    app: tauri::AppHandle,
+    core: State<'_, Inspector>,
+    monitor: State<'_, repository_watch::RepositoryWatch>,
+    snapshot_id: String,
+    watch_id: String,
+) -> Result<RepositoryWatchStatus, String> {
+    let baseline = core.repository_watch_baseline(&snapshot_id).await;
+    Ok(monitor.start(app, snapshot_id, watch_id, baseline).await)
+}
+#[tauri::command]
+fn stop_repository_watch(monitor: State<'_, repository_watch::RepositoryWatch>, watch_id: String) {
+    monitor.stop(&watch_id)
+}
+#[tauri::command]
+fn check_repository_watch(monitor: State<'_, repository_watch::RepositoryWatch>, watch_id: String) {
+    monitor.check(&watch_id)
 }
 #[tauri::command]
 async fn relocate_repository(
@@ -153,6 +173,7 @@ pub fn run() {
                 .map(std::path::PathBuf::from)
                 .unwrap_or(app.path().app_data_dir()?);
             app.manage(Inspector::new(directory)?);
+            app.manage(repository_watch::RepositoryWatch::default());
             use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
             let open =
                 MenuItem::with_id(app, "open", "Open Repository…", true, Some("CmdOrCtrl+O"))?;
@@ -199,6 +220,9 @@ pub fn run() {
             cancel_navigation,
             save_preferences,
             open_repository,
+            start_repository_watch,
+            stop_repository_watch,
+            check_repository_watch,
             relocate_repository,
             read_file,
             list_branches,
@@ -217,6 +241,7 @@ pub fn run() {
         .expect("Unable to start Peer")
         .run(|app, event| {
             if matches!(event, tauri::RunEvent::Exit) {
+                app.state::<repository_watch::RepositoryWatch>().shutdown();
                 tauri::async_runtime::block_on(app.state::<Inspector>().shutdown_navigation());
             }
         });
