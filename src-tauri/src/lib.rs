@@ -1,4 +1,6 @@
 mod diagnostics;
+#[cfg(target_os = "macos")]
+mod macos_navigation;
 mod repository_watch;
 
 use peer_core::navigation::{NavigationError, NavigationFile, NavigationRequest, NavigationResult};
@@ -164,6 +166,8 @@ pub fn run() {
     let builder = builder
         .plugin(tauri_plugin_wdio::init())
         .plugin(tauri_plugin_wdio_webdriver::init());
+    #[cfg(target_os = "macos")]
+    let mut navigation_monitor = None;
     builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
@@ -235,12 +239,23 @@ pub fn run() {
             export_queue,
             save_export,
             import_theme,
+            #[cfg(all(target_os = "macos", feature = "desktop-tests"))]
+            macos_navigation::test_swipe,
             remove_theme
         ])
         .build(tauri::generate_context!())
         .expect("Unable to start Peer")
-        .run(|app, event| {
+        .run(move |app, event| {
+            #[cfg(target_os = "macos")]
+            if matches!(event, tauri::RunEvent::Ready) {
+                match macos_navigation::Monitor::install(app) {
+                    Ok(monitor) => navigation_monitor = Some(monitor),
+                    Err(error) => eprintln!("Unable to enable native history gestures: {error}"),
+                }
+            }
             if matches!(event, tauri::RunEvent::Exit) {
+                #[cfg(target_os = "macos")]
+                drop(navigation_monitor.take());
                 app.state::<repository_watch::RepositoryWatch>().shutdown();
                 tauri::async_runtime::block_on(app.state::<Inspector>().shutdown_navigation());
             }

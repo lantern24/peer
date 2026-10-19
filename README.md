@@ -147,6 +147,8 @@ Destinations open as complete, read-only source files, including files that are 
 
 Use **⌘+[** / **⌘+]** on macOS or **Alt+←** / **Alt+→** on Windows and Linux to go Back / Forward, matching Chrome. The toolbar Back and Forward buttons do the same; **Ctrl+-** remains available for Back. Navigation restores the file, source selection, scroll position, and diff expansion state. These shortcuts leave text fields and open dialogs untouched.
 
+Mouse **Back / Forward** side buttons use the same view history, including when the pointer is over source text. Peer also accepts the `BrowserBack` / `BrowserForward` keys emitted by some mouse drivers. On macOS, native horizontal swipe gestures—including Logi Options+’s Back / Forward assignments—navigate the same history; ordinary scrolling is unchanged. These controls do not navigate behind an open dialog or leave the Peer document at the ends of history. For per-app mouse assignments, use Back / Forward or the keyboard shortcuts above.
+
 History includes file selection, quick-open, search results, line jumps, comment jumps, and symbol jumps. Navigating somewhere new after going Back clears Forward history. History holds up to 100 entries for the current comparison and resets on refresh, comparison changes (including switching Code/Changes), or opening another repository. Source pages retain the original feedback queue and drafts; comments and Reviewed actions remain in the review view. Find and Go to Line operate on the displayed source page.
 
 Configure servers in **Settings → Code navigation**. Go, TypeScript/JavaScript, Python, and Rust have presets. Servers and their toolchains must be installed locally; Peer does not install them or fetch dependencies. Suggested setup for the tested presets:

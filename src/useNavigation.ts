@@ -6,6 +6,7 @@ import {
   useState,
   type RefObject,
 } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { api } from "./api";
 import type {
   Snapshot,
@@ -408,6 +409,17 @@ export function useNavigation({
         event.repeat
       )
         return;
+      if (
+        !event.altKey &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        !event.shiftKey &&
+        (event.key === "BrowserBack" || event.key === "BrowserForward")
+      ) {
+        event.preventDefault();
+        void (event.key === "BrowserBack" ? back() : forward());
+        return;
+      }
       const historyModifier =
         !event.shiftKey &&
         !event.ctrlKey &&
@@ -447,6 +459,41 @@ export function useNavigation({
     window.addEventListener("keydown", keys);
     return () => window.removeEventListener("keydown", keys);
   }, [navigate, back, forward, isMac, viewer]);
+  useEffect(() => {
+    const mouseHistory = (event: MouseEvent) => {
+      if (event.button !== 3 && event.button !== 4) return;
+      const blocked =
+        event.defaultPrevented || !!document.querySelector("dialog[open]");
+      // Never let side buttons navigate the WebView document, even at a history
+      // boundary or over a dialog. Use mouseup because older WebKit lacks auxclick.
+      event.preventDefault();
+      if (event.type === "mouseup" && !blocked)
+        void (event.button === 3 ? back() : forward());
+    };
+    window.addEventListener("mousedown", mouseHistory);
+    window.addEventListener("mouseup", mouseHistory);
+    window.addEventListener("auxclick", mouseHistory);
+    return () => {
+      window.removeEventListener("mousedown", mouseHistory);
+      window.removeEventListener("mouseup", mouseHistory);
+      window.removeEventListener("auxclick", mouseHistory);
+    };
+  }, [back, forward]);
+  useEffect(() => {
+    let disposed = false;
+    const listener = listen<"back" | "forward">(
+      "navigation-swipe",
+      ({ payload }) => {
+        if (disposed || document.querySelector("dialog[open]")) return;
+        if (payload === "back") void back();
+        if (payload === "forward") void forward();
+      },
+    );
+    return () => {
+      disposed = true;
+      void listener.then((unlisten) => unlisten());
+    };
+  }, [back, forward]);
   return {
     page,
     file,
