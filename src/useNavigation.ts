@@ -402,24 +402,25 @@ export function useNavigation({
   }, [epoch, file, page, selected, viewer]);
   useEffect(() => {
     const keys = (event: KeyboardEvent) => {
-      if (
+      const blocked =
         event.defaultPrevented ||
         event.isComposing ||
         isTyping(event) ||
-        event.repeat
-      )
-        return;
-      if (
-        !event.altKey &&
-        !event.ctrlKey &&
-        !event.metaKey &&
-        !event.shiftKey &&
-        (event.key === "BrowserBack" || event.key === "BrowserForward")
-      ) {
+        event.repeat;
+      if (event.key === "BrowserBack" || event.key === "BrowserForward") {
+        // Cancel WebView history even when Peer must leave app history alone.
         event.preventDefault();
-        void (event.key === "BrowserBack" ? back() : forward());
+        if (
+          !blocked &&
+          !event.altKey &&
+          !event.ctrlKey &&
+          !event.metaKey &&
+          !event.shiftKey
+        )
+          void (event.key === "BrowserBack" ? back() : forward());
         return;
       }
+      if (blocked) return;
       const historyModifier =
         !event.shiftKey &&
         !event.ctrlKey &&

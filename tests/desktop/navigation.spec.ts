@@ -892,43 +892,118 @@ describe("Version-aware navigation", () => {
     await expect($('[aria-label="Go back"]')).not.toBeEnabled();
   });
 
-  it("accepts mouse drivers mapped to browser navigation keys", async () => {
+  it("accepts mouse drivers mapped to browser navigation keys without leaving Peer", async () => {
+    const browserKey = (
+      direction: "back" | "forward",
+      options: KeyboardEventInit = {},
+      selector?: string,
+      alreadyCancelled = false,
+    ) =>
+      browser.execute(
+        async (direction, options, selector, alreadyCancelled) => {
+          const event = new KeyboardEvent("keydown", {
+            key: direction === "back" ? "BrowserBack" : "BrowserForward",
+            bubbles: true,
+            composed: true,
+            cancelable: true,
+            ...options,
+          });
+          const target = selector ? document.querySelector(selector) : window;
+          if (!target) throw new Error(`Missing keyboard target: ${selector}`);
+          if (alreadyCancelled) event.preventDefault();
+          target.dispatchEvent(event);
+          await new Promise<void>((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+          );
+          return event.defaultPrevented;
+        },
+        direction,
+        options,
+        selector,
+        alreadyCancelled,
+      );
+    const selectedFile = async (path: string, text: string) => {
+      await expect($(`.tree-file[title="${path}"]`)).toHaveAttribute(
+        "aria-current",
+        "true",
+      );
+      await sourceContains(text);
+    };
+    const staysPut = async (
+      options: KeyboardEventInit = {},
+      selector?: string,
+      alreadyCancelled = false,
+    ) => {
+      for (const direction of ["back", "forward"] as const) {
+        expect(
+          await browserKey(direction, options, selector, alreadyCancelled),
+        ).toBe(true);
+        await selectedFile("defs.ts", "version B");
+        await expect($('[aria-label="Go back"]')).toBeEnabled();
+        await expect($('[aria-label="Go forward"]')).toBeEnabled();
+      }
+    };
     await switchView("Code");
     await $('.tree-file[title="call.ts"]').click();
-    await sourceContains("asdf(); // B");
+    await selectedFile("call.ts", "asdf(); // B");
+    await $('[aria-label="Refresh repository"]').click();
+    await $('[aria-label="Refresh repository"]').waitForEnabled();
     await $('.tree-file[title="defs.ts"]').click();
-    await sourceContains("version B");
-    const browserKey = (direction: "back" | "forward", selector?: string) =>
-      historyKey(
-        direction,
-        {
-          key: direction === "back" ? "BrowserBack" : "BrowserForward",
-          metaKey: false,
-          altKey: false,
-        },
-        selector,
-      );
+    await selectedFile("defs.ts", "version B");
+    await $('.tree-file[title="keep.ts"]').click();
+    await selectedFile("keep.ts", "export function keep");
     expect(await browserKey("back")).toBe(true);
-    await expect($('.tree-file[title="call.ts"]')).toHaveAttribute(
-      "aria-current",
-      "true",
-    );
-    await sourceContains("asdf(); // B");
+    await selectedFile("defs.ts", "version B");
+
+    // Every blocked event is cancelled without changing either history direction.
     await $('button[aria-label="Find in file"]').click();
-    expect(
-      await browserKey("forward", 'input[aria-label="Find in file"]'),
-    ).toBe(false);
-    await expect($('.tree-file[title="call.ts"]')).toHaveAttribute(
-      "aria-current",
-      "true",
-    );
+    await staysPut({}, 'input[aria-label="Find in file"]');
     await $('[aria-label="Close search"]').click();
+    await browser.execute(() => {
+      const editable = document.createElement("div");
+      editable.id = "browser-key-editable";
+      editable.contentEditable = "true";
+      editable.textContent = "Editable keyboard target";
+      document.body.append(editable);
+      editable.focus();
+    });
+    try {
+      await staysPut({}, "#browser-key-editable");
+    } finally {
+      await browser.execute(() =>
+        document.querySelector("#browser-key-editable")?.remove(),
+      );
+    }
+    await key("p", true);
+    await $('[aria-label="Quick open file"]').waitForDisplayed();
+    await staysPut();
+    await browser.keys("Escape");
+    await $('[aria-label="Quick open file"]').waitForExist({ reverse: true });
+    for (const options of [
+      { repeat: true },
+      { isComposing: true },
+      { altKey: true },
+      { ctrlKey: true },
+      { metaKey: true },
+      { shiftKey: true },
+    ]) {
+      await staysPut(options);
+    }
+    await staysPut({}, undefined, true);
+
+    // Traversal still reaches the original entries and boundaries, not new history.
+    expect(await browserKey("back")).toBe(true);
+    await selectedFile("call.ts", "asdf(); // B");
+    await expect($('[aria-label="Go back"]')).not.toBeEnabled();
+    expect(await browserKey("back")).toBe(true);
+    await selectedFile("call.ts", "asdf(); // B");
     expect(await browserKey("forward")).toBe(true);
-    await expect($('.tree-file[title="defs.ts"]')).toHaveAttribute(
-      "aria-current",
-      "true",
-    );
-    await sourceContains("version B");
+    await selectedFile("defs.ts", "version B");
+    expect(await browserKey("forward")).toBe(true);
+    await selectedFile("keep.ts", "export function keep");
+    await expect($('[aria-label="Go forward"]')).not.toBeEnabled();
+    expect(await browserKey("forward")).toBe(true);
+    await selectedFile("keep.ts", "export function keep");
   });
 
   it("uses native history keys and restores the forward viewport", async () => {
