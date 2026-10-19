@@ -34,6 +34,8 @@ pub struct RepositorySnapshot {
     pub signature: String,
     pub git: String,
     pub navigation: BTreeMap<String, crate::navigation::Inventory>,
+    pub repository_watch:
+        Result<Option<std::sync::Arc<crate::monitor::RepositoryBaseline>>, String>,
 }
 
 pub fn discover_git(override_path: Option<&str>) -> String {
@@ -224,6 +226,24 @@ pub async fn create_snapshot(
         .await
         .map_err(|e| format!("Choose a Git working directory. {e}"))?;
     let root = fs::canonicalize(root_string).map_err(|e| e.to_string())?;
+    // Capture before collecting any displayed inventory/content. A second probe
+    // below rejects mixed-time snapshots, and activation reuses this baseline.
+    // Monitoring failures are reported separately, never a reason to deny review.
+    let mut repository_watch = if comparison.mode == "commit" {
+        Ok(None)
+    } else {
+        crate::monitor::RepositoryBaseline::capture(
+            &g,
+            &root,
+            if comparison.mode == "branch" {
+                comparison.base_ref.as_deref()
+            } else {
+                None
+            },
+        )
+        .await
+        .map(Some)
+    };
     let signature_before = signature(&g, &root).await?;
     let head = text(&g, &root, &["rev-parse", "--verify", "HEAD"])
         .await
@@ -611,6 +631,13 @@ pub async fn create_snapshot(
     if signature_before != signature(&g, &root).await? {
         return Err(STALE.into());
     }
+    if let Ok(Some(baseline)) = &repository_watch {
+        match baseline.probe().await {
+            Ok(true) => return Err(STALE.into()),
+            Ok(false) => {}
+            Err(error) => repository_watch = Err(error),
+        }
+    }
     let mut files: Vec<_> = records.values().map(|r| r.entry.clone()).collect();
     files.sort_by(|a, b| a.path.cmp(&b.path));
     let queue_id = hash(
@@ -636,6 +663,7 @@ pub async fn create_snapshot(
         signature: signature_before,
         git: g,
         navigation,
+        repository_watch,
     })
 }
 

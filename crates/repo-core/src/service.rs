@@ -32,6 +32,13 @@ impl Inspector {
             .cloned()
             .ok_or("Snapshot expired. Refresh the repository.".into())
     }
+    /// Clone only the lightweight baseline, not the review/navigation snapshot.
+    pub async fn repository_watch_baseline(
+        &self,
+        id: &str,
+    ) -> Result<Option<Arc<crate::monitor::RepositoryBaseline>>, String> {
+        self.snapshot(id).await?.repository_watch.clone()
+    }
     /// Retire child processes and temporary analysis sources before application exit.
     pub async fn shutdown_navigation(&self) {
         self.navigation.invalidate().await;

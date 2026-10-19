@@ -51,6 +51,7 @@ import { HighlightCacheBudget } from "./HighlightCacheBudget";
 import { SourceCache } from "./memory";
 import { retainFile, sourceLines } from "./loaded-file";
 import { useNavigation } from "./useNavigation";
+import { useRepositoryWatch } from "./useRepositoryWatch";
 import { NavigationSource } from "./NavigationSource";
 import { NavigationResults } from "./NavigationResults";
 import type { ViewportState } from "./navigation";
@@ -114,6 +115,7 @@ export default function App() {
   const [imported, setImported] = useState<ImportedTheme[]>([]);
   const [ready, setReady] = useState(false);
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
+  const repositoryNotice = useRepositoryWatch(snapshot);
   const [selected, setSelected] = useState<string | null>(null);
   const [loaded, setLoaded] = useState<Record<string, LoadedFile>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -1628,6 +1630,36 @@ export default function App() {
             </>
           )}
           <div className="toolbar-spacer" />
+          <div
+            className="repository-watch-status"
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+          >
+            {repositoryNotice && (
+              <div
+                data-repository-watch
+                data-state={
+                  repositoryNotice.error !== null ? "error" : "changed"
+                }
+                className="repository-watch-notice"
+                title={repositoryNotice.error ?? undefined}
+              >
+                <span>
+                  {repositoryNotice.error !== null
+                    ? "Automatic change detection unavailable; refresh manually"
+                    : "Repository changed on disk. Refresh when you're ready."}
+                </span>
+                <button
+                  aria-label="Refresh changed repository"
+                  disabled={busy}
+                  onClick={refresh}
+                >
+                  Refresh
+                </button>
+              </div>
+            )}
+          </div>
           <span>{theme.name}</span>
           {selectedFile && (
             <span>Tab width: {selectedFile.content.tabWidth}</span>

@@ -1155,6 +1155,9 @@ p {
 }
 .statusbar {
   min-height: 27px;
+  height: 27px;
+  flex-shrink: 0;
+  white-space: nowrap;
   display: flex;
   align-items: center;
   gap: 16px;
@@ -1164,6 +1167,29 @@ p {
   font-size: 9px;
   color: var(--muted);
   user-select: none;
+}
+.repository-watch-status {
+  min-width: 0;
+}
+.repository-watch-notice {
+  height: 26px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--accent);
+  font-size: 11px;
+}
+.repository-watch-notice > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.repository-watch-notice button {
+  flex-shrink: 0;
+  height: 20px;
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 10px;
 }
 .error-banner {
   display: flex;

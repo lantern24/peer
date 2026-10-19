@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import type {
   Bootstrap,
   Comparison,
@@ -8,6 +9,7 @@ import type {
   NewComment,
   Preferences,
   ReviewComment,
+  RepositoryWatchStatus,
   ReviewQueue,
   Snapshot,
   NavigationRequest,
@@ -43,6 +45,19 @@ export const api = {
     invoke<Snapshot>("open_repository", { path, comparison }),
   relocate: (previousPath: string, path: string) =>
     invoke<Snapshot>("relocate_repository", { previousPath, path }),
+  startRepositoryWatch: (snapshotId: string, watchId: string) =>
+    invoke<RepositoryWatchStatus>("start_repository_watch", {
+      snapshotId,
+      watchId,
+    }),
+  stopRepositoryWatch: (watchId: string) =>
+    invoke<void>("stop_repository_watch", { watchId }),
+  checkRepositoryWatch: (watchId: string) =>
+    invoke<void>("check_repository_watch", { watchId }),
+  listenRepositoryWatch: (onStatus: (status: RepositoryWatchStatus) => void) =>
+    listen<RepositoryWatchStatus>("repository-changed", ({ payload }) =>
+      onStatus(payload),
+    ),
   read: (snapshotId: string, fileId: string, force = false) =>
     invoke<FileContent>("read_file", { snapshotId, fileId, force }),
   branches: (snapshotId: string) =>

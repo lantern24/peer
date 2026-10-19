@@ -50,6 +50,12 @@ export type Snapshot = {
   commit?: Commit;
   files: FileEntry[];
 };
+export type RepositoryWatchStatus = {
+  snapshotId: string;
+  watchId: string;
+  changed: boolean;
+  error: string | null;
+};
 export type FileContent = {
   snapshotId: string;
   fileId: string;

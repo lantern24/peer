@@ -1,4 +1,5 @@
 mod lsp;
+pub mod monitor;
 pub mod navigation;
 pub mod repository;
 pub mod service;
