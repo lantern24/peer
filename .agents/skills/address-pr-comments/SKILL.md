@@ -99,7 +99,7 @@ jq 'select(.isResolved == false)' "$REVIEW_DIR/threads.jsonl"
 
 ## Testing and verification
 
-Consult `README.md`, `docs/VALIDATION.md`, `package.json`, and `.github/workflows/ci.yml`; run commands from the repository root. There is no Go control plane, Next.js `gui/` package, or `npm run lint` script in Peer.
+Consult `AGENTS.md`, `docs/VALIDATION.md`, `package.json`, and `.github/workflows/ci.yml`; run commands from the repository root. There is no Go control plane, Next.js `gui/` package, or `npm run lint` script in Peer.
 
 ```bash
 # Frontend behavior and TypeScript/production build
@@ -123,7 +123,7 @@ npm run test:desktop
 - Scope tests to the affected behavior first; for example, `npm test -- src/refresh.test.ts` or the relevant existing Rust test filter.
 - For a specific native scenario, pass `-- --spec tests/desktop/repositories.spec.ts --mochaOpts.grep "updates a moved repository"` to `npm run test:desktop`, substituting the affected scenario.
 - Observe the actual UI for UI fixes. `npm run desktop` launches Peer; desktop checks require an active, unlocked desktop. Browser-only checks do not verify Tauri commands or native integrations.
-- Navigation fixes may need the opt-in real-language-server tests and prerequisites documented in `README.md` and CI.
+- Navigation fixes may need the opt-in real-language-server tests documented in `AGENTS.md` and CI, with server setup in `docs/USER_MANUAL.md`.
 - Keep formatting limited to changed files. Do not run a repository-wide write-formatting command to address one review comment.
 - Report unavailable runtime prerequisites and unrelated failures explicitly. Do not claim CI success without observing it.
 
