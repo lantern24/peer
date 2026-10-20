@@ -1,6 +1,6 @@
 # Peer contributor guide
 
-Development, release, architecture, and validation guidance lives here. Keep [README.md](README.md) focused on installation and use of Peer.
+Development, release, architecture, and validation guidance lives here. Keep [README.md](README.md) focused on installation and concise usage information; document the detailed review workflow in the [user manual](docs/USER_MANUAL.md).
 
 Peer is built with Tauri 2, React, TypeScript, and an independent Rust core. Preserve its read-only behavior: the app never edits, stages, commits, fetches, or applies changes to viewed repositories.
 
