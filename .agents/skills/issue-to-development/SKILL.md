@@ -87,7 +87,7 @@ npm run test:desktop
 - For a focused frontend test, use `npm test -- src/refresh.test.ts` or the relevant existing test path.
 - For a focused native scenario, use `npm run test:desktop -- --spec tests/desktop/repositories.spec.ts --mochaOpts.grep "updates a moved repository"`, replacing the path and scenario with the affected one.
 - UI changes require observing the actual affected surface. Launch with `npm run desktop`; native desktop tests require an active, unlocked desktop. Browser-only checks cannot establish native menu, dialog, clipboard, or Tauri behavior.
-- Code-navigation changes may require the opt-in real-language-server tests documented in `AGENTS.md` and `.github/workflows/ci.yml`; install their server prerequisites from `README.md` before running them.
+- Code-navigation changes may require the opt-in real-language-server tests documented in `AGENTS.md` and `.github/workflows/ci.yml`; install their server prerequisites from `docs/USER_MANUAL.md` before running them.
 - Do not run repository-wide write-formatting commands on unrelated files. Keep formatting limited to the files being changed.
 
 ## Decision points and edge cases

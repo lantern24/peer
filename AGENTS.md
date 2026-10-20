@@ -1,6 +1,6 @@
 # Peer contributor guide
 
-Development, release, architecture, and validation guidance lives here. Keep [README.md](README.md) focused on installation and concise usage information; document the detailed review workflow in the [user manual](docs/USER_MANUAL.md).
+Development, release, architecture, and validation guidance lives here. Keep [README.md](README.md) focused on the product overview, installation, and documentation links; document detailed usage, configuration, and troubleshooting in the [user manual](docs/USER_MANUAL.md).
 
 Peer is built with Tauri 2, React, TypeScript, and an independent Rust core. Preserve its read-only behavior: the app never edits, stages, commits, fetches, or applies changes to viewed repositories.
 
@@ -66,7 +66,7 @@ A future MCP adapter can instantiate the Rust `Inspector` against the same store
 
 ### Code navigation internals
 
-User-facing server installation and configuration are documented in [README.md](README.md#code-navigation).
+User-facing server installation and configuration are documented in the [user manual](docs/USER_MANUAL.md#code-navigation).
 
 Analysis starts only when requested. Peer copies the chosen version into an isolated temporary workspace with its project files and configuration. It checks working-file stamps before and after copying; source changes during preparation require Refresh. Once prepared, navigation uses that frozen source until refresh. Up to four language-server sessions are retained, with a five-minute idle timeout and at most 32 open documents per session. Temporary workspaces are removed when their navigation context is released or the app exits.
 
@@ -78,7 +78,7 @@ Installed JavaScript dependency trees are copied into the temporary workspace, w
 
 ### Mouse navigation
 
-- **Shared handling on macOS, Windows, and Linux:** [src/useNavigation.ts](src/useNavigation.ts) handles standard mouse Back / Forward button events and `BrowserBack` / `BrowserForward` key events delivered to the WebView. Mouse buttons mapped to the [navigation shortcuts](README.md#code-navigation) use the existing keyboard navigation path.
+- **Shared handling on macOS, Windows, and Linux:** [src/useNavigation.ts](src/useNavigation.ts) handles standard mouse Back / Forward button events and `BrowserBack` / `BrowserForward` key events delivered to the WebView. Mouse buttons mapped to the [navigation shortcuts](docs/USER_MANUAL.md#code-navigation) use the existing keyboard navigation path.
 - **Additional native handling on macOS:** [src-tauri/src/macos_navigation.rs](src-tauri/src/macos_navigation.rs) handles discrete AppKit horizontal swipe events (`NSEventTypeSwipe`), such as Logi Options+’s Back / Forward gesture assignments. This module and its AppKit dependencies compile only on macOS. Ordinary scrolling is unchanged.
 - **Windows and Linux boundary:** there are no additional native mouse-driver command handlers for these platforms. A proprietary or OS-level command that does not reach the WebView as a supported mouse/key event will not trigger Peer’s view history.
 
