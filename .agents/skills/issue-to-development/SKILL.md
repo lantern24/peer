@@ -19,7 +19,7 @@ Fetch the issue title, body, and comments; create an issue-numbered branch from 
 - `src-tauri/`: Tauri 2 desktop application, native integrations, and command bridge.
 - `tests/desktop/`: WebdriverIO tests that launch the actual Tauri application.
 - Peer is a local, read-only repository viewer. Preserve its invariant that the application never edits, stages, commits, fetches, or applies changes to viewed repositories. This does not prohibit Git operations on Peer's own development checkout.
-- Consult `README.md`, `docs/VALIDATION.md`, `package.json`, and `.github/workflows/ci.yml` for current setup and verification requirements. Development requires Node.js 22+, Rust 1.88+, Git, and the platform's Tauri prerequisites.
+- Consult `AGENTS.md`, `docs/VALIDATION.md`, `package.json`, and `.github/workflows/ci.yml` for current setup and verification requirements. Development requires Node.js 22+, Rust 1.88+, Git, and the platform's Tauri prerequisites.
 
 ## Commands (examples)
 
@@ -87,7 +87,7 @@ npm run test:desktop
 - For a focused frontend test, use `npm test -- src/refresh.test.ts` or the relevant existing test path.
 - For a focused native scenario, use `npm run test:desktop -- --spec tests/desktop/repositories.spec.ts --mochaOpts.grep "updates a moved repository"`, replacing the path and scenario with the affected one.
 - UI changes require observing the actual affected surface. Launch with `npm run desktop`; native desktop tests require an active, unlocked desktop. Browser-only checks cannot establish native menu, dialog, clipboard, or Tauri behavior.
-- Code-navigation changes may require the opt-in real-language-server tests documented in `README.md` and `.github/workflows/ci.yml`; install their specified server prerequisites before running them.
+- Code-navigation changes may require the opt-in real-language-server tests documented in `AGENTS.md` and `.github/workflows/ci.yml`; install their server prerequisites from `README.md` before running them.
 - Do not run repository-wide write-formatting commands on unrelated files. Keep formatting limited to the files being changed.
 
 ## Decision points and edge cases

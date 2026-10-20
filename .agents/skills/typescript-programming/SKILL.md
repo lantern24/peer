@@ -156,7 +156,7 @@ npm run test:desktop -- --spec tests/desktop/sidebars.spec.ts
   `vite.config.ts`, not desktop runner/spec files or all configuration/scripts. Vitest execution
   is not full typechecking of those files; exercise their actual runtime and report this scope.
 - Native tests require Rust/Tauri platform prerequisites and an active unlocked desktop; consult
-  `README.md` and `tests/desktop/wdio.conf.ts`. Use `npm run desktop` for manual real-app smoke;
+  `AGENTS.md` and `tests/desktop/wdio.conf.ts`. Use `npm run desktop` for manual real-app smoke;
   Vite-only preview cannot prove native IPC behavior. For IPC/core changes also run `npm run test:core`.
 - Do not use broad `npm run format` for a focused patch or invent `lint`/`lint:fix` scripts.
   Do not install new lint, schema, or state-management dependencies to satisfy these guidelines.
