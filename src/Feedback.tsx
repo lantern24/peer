@@ -19,6 +19,7 @@ export type Draft = {
   line?: number;
   side?: "old" | "new";
   body: string;
+  error?: string;
 };
 type Props = {
   queue: ReviewQueue;
@@ -27,8 +28,11 @@ type Props = {
   focusRequest: number;
   busy: boolean;
   copying: boolean;
+  refreshing: boolean;
   onDraft: (draft?: Draft) => void;
   onSubmit: () => void;
+  onRefresh: () => void;
+  onReviewDraft?: () => void;
   onCopy: () => void;
   deleteAfterCopy: boolean;
   onDeleteAfterCopyChange: (enabled: boolean) => void;
@@ -47,8 +51,11 @@ export function Feedback({
   focusRequest,
   busy,
   copying,
+  refreshing,
   onDraft,
   onSubmit,
+  onRefresh,
+  onReviewDraft,
   onCopy,
   deleteAfterCopy,
   onDeleteAfterCopyChange,
@@ -157,6 +164,7 @@ export function Feedback({
               ref={composer}
               aria-label="Comment text"
               placeholder="Suggest a change or ask a question…"
+              aria-describedby={draft.error ? "draft-error" : undefined}
               value={draft.body}
               onChange={(e) => onDraft({ ...draft, body: e.target.value })}
               onKeyDown={(e) => {
@@ -166,9 +174,41 @@ export function Feedback({
                 }
               }}
             />
+            {draft.error && (
+              <div className="draft-error">
+                <p id="draft-error" role="alert">
+                  {draft.error}
+                </p>
+                <p>
+                  Your text is kept. If the source changed, refresh and review
+                  it, then use + on the intended line or Comment on file to
+                  reuse this draft at that location.
+                </p>
+                <div className="row">
+                  <button
+                    type="button"
+                    className="small-button"
+                    disabled={busy || copying || refreshing}
+                    onClick={onRefresh}
+                  >
+                    {refreshing ? "Refreshing…" : "Refresh"}
+                  </button>
+                  {onReviewDraft && (
+                    <button
+                      type="button"
+                      className="small-button"
+                      disabled={busy || copying || refreshing}
+                      onClick={onReviewDraft}
+                    >
+                      Review file
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
             <button
               className="primary-button"
-              disabled={!draft.body.trim() || busy || copying}
+              disabled={!draft.body.trim() || busy || copying || refreshing}
             >
               <Send size={13} />
               {busy ? "Saving…" : "Add comment"}

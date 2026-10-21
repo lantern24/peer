@@ -1297,6 +1297,134 @@ describe("Peer in the native webview", () => {
     );
   });
 
+  for (const view of ["Code", "Changes"] as const) {
+    it(`recovers a stale ${view} line draft without silently moving its anchor`, async () => {
+      await switchView(view);
+      const type = view === "Code" ? "context" : "change-addition";
+      await clickLineComment(2, type);
+      const body = `Keep this stale ${view} draft`;
+      await $('[aria-label="Comment text"]').setValue(body);
+      const path = join(process.env.PEER_TEST_REPO!, "src/module-000.ts");
+      writeFileSync(
+        path,
+        `// inserted before the draft\n${readFileSync(path, "utf8")}`,
+      );
+
+      await click(".comment-composer .primary-button");
+      await expect($(".draft-error [role=alert]")).toBeDisplayed();
+      await expect($('[aria-label="Comment text"]')).toHaveValue(body);
+      await expect($(".comment-card")).not.toExist();
+      await $(".draft-error").$("button=Refresh").click();
+      await $('[aria-label="Refresh repository"]').waitForEnabled();
+      await browser.waitUntil(() =>
+        browser.execute(() =>
+          document
+            .querySelector('[data-file-path="src/module-000.ts"]')
+            ?.closest("diffs-container")
+            ?.shadowRoot?.textContent?.includes("inserted before the draft"),
+        ),
+      );
+
+      // Refresh is not consent to attach the old line number to different code.
+      await click(".comment-composer .primary-button");
+      await expect($(".comment-composer .primary-button")).toBeEnabled();
+      await expect($(".draft-error [role=alert]")).toBeDisplayed();
+      await expect($(".comment-composer .comment-location")).toHaveText(
+        "line 2",
+      );
+      await expect($('[aria-label="Comment text"]')).toHaveValue(body);
+      await expect($(".comment-card")).not.toExist();
+      await browser.saveScreenshot(
+        resolve(`test-results/stale-draft-${view}.png`),
+      );
+
+      await click('.tree-file[title="src/module-001.ts"]');
+      await click("button=Review file");
+      await expect($('.tree-file[title="src/module-000.ts"]')).toHaveAttribute(
+        "aria-current",
+        "true",
+      );
+      await clickLineComment(3, type);
+      await expect($('[aria-label="Comment text"]')).toBeFocused();
+      await expect($('[aria-label="Comment text"]')).toHaveValue(body);
+      await expect($(".draft-error")).not.toExist();
+      await click(".comment-composer .primary-button");
+      await $(".comment-composer").waitForExist({ reverse: true });
+      await expect($(".comment-card p")).toHaveText(body);
+      const saved: { queues: Record<string, ReviewQueue> } = JSON.parse(
+        readFileSync(join(process.env.PEER_DATA_DIR!, "state.json"), "utf8"),
+      );
+      const comments = Object.values(saved.queues).flatMap(
+        (queue) => queue.comments,
+      );
+      expect(comments).toHaveLength(1);
+      expect(comments[0].path).toBe("src/module-000.ts");
+      expect(comments[0].anchor.line).toBe(3);
+      expect(comments[0].anchor.side).toBe(view === "Code" ? undefined : "new");
+      expect(comments[0].anchor.lineText).toContain("item0_1");
+    });
+  }
+
+  it("saves an unchanged draft after refreshing unrelated source changes", async () => {
+    await clickLineComment(2, "change-addition");
+    const body = "Keep the unchanged anchor";
+    await $('[aria-label="Comment text"]').setValue(body);
+    appendFileSync(
+      join(process.env.PEER_TEST_REPO!, "notes.txt"),
+      "\nchanged elsewhere\n",
+    );
+    await click('[aria-label="Refresh repository"]');
+    await $('[aria-label="Refresh repository"]').waitForEnabled();
+    await click(".comment-composer .primary-button");
+    await $(".comment-composer").waitForExist({ reverse: true });
+    await expect($(".comment-card p")).toHaveText(body);
+    const saved: { queues: Record<string, ReviewQueue> } = JSON.parse(
+      readFileSync(join(process.env.PEER_DATA_DIR!, "state.json"), "utf8"),
+    );
+    const comment = Object.values(saved.queues).flatMap(
+      (queue) => queue.comments,
+    )[0];
+    expect(comment.path).toBe("src/module-000.ts");
+    expect(comment.anchor.line).toBe(2);
+    expect(comment.anchor.side).toBe("new");
+    expect(comment.anchor.lineText).toContain("item0_1");
+  });
+
+  it("keeps a removed file draft recoverable at an explicitly selected file", async () => {
+    const path = join(process.env.PEER_TEST_REPO!, "refresh-removed.txt");
+    writeFileSync(path, "temporary review source\n");
+    await click('[aria-label="Refresh repository"]');
+    await $('[aria-label="Refresh repository"]').waitForEnabled();
+    await click('.tree-file[title="refresh-removed.txt"]');
+    await clickInPlace('[aria-label="Comment on file refresh-removed.txt"]');
+    const body = "Keep feedback for the removed file";
+    await $('[aria-label="Comment text"]').setValue(body);
+    unlinkSync(path);
+    await click('[aria-label="Refresh repository"]');
+    await $('[aria-label="Refresh repository"]').waitForEnabled();
+    await click(".comment-composer .primary-button");
+    await expect($(".draft-error [role=alert]")).toBeDisplayed();
+    await expect($("button=Review file")).not.toExist();
+    await expect($('[aria-label="Comment text"]')).toHaveValue(body);
+    await expect($(".comment-card")).not.toExist();
+    await click('.tree-file[title="src/module-000.ts"]');
+    await clickInPlace('[aria-label="Comment on file src/module-000.ts"]');
+    await expect($('[aria-label="Comment text"]')).toHaveValue(body);
+    await expect($(".draft-error")).not.toExist();
+    await click(".comment-composer .primary-button");
+    await $(".comment-composer").waitForExist({ reverse: true });
+    await expect($(".comment-card p")).toHaveText(body);
+    const saved: { queues: Record<string, ReviewQueue> } = JSON.parse(
+      readFileSync(join(process.env.PEER_DATA_DIR!, "state.json"), "utf8"),
+    );
+    const comment = Object.values(saved.queues).flatMap(
+      (queue) => queue.comments,
+    )[0];
+    expect(comment.path).toBe("src/module-000.ts");
+    expect(comment.scope).toBe("file");
+    expect(comment.anchor.line).toBeUndefined();
+  });
+
   it("marks saved feedback outdated after refresh and keeps separate Code feedback", async () => {
     await addFileComment("Feedback saved before refresh");
     appendFileSync(

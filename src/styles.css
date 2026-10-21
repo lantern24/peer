@@ -1153,6 +1153,18 @@ p {
   margin-left: auto;
   display: flex;
 }
+.draft-error {
+  margin-bottom: 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.draft-error p {
+  margin: 0 0 8px;
+}
+.draft-error [role="alert"] {
+  color: var(--remove);
+}
 .statusbar {
   min-height: 27px;
   height: 27px;

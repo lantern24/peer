@@ -44,6 +44,8 @@ Use the gutter **+** to comment on a line, or a file header's comment button for
 
 Refresh marks comments outdated when their file fingerprint changes, and resets Reviewed for changed files. Original anchors and context remain intact, including feedback on files that disappear. Drafts survive theme and view switching during the session; only saved comments survive application restarts.
 
+If the source changes while you are writing, Peer rejects submission rather than attaching the draft to different code. The error appears inside the comment editor, with **Refresh** and, when the file is still in the view, **Review file** actions. Refresh alone does not move a draft's anchor to changed content: review the refreshed source, then click the gutter **+** at the intended line or the file header's comment button. This reuses your draft text at the explicitly chosen location; you can then choose **Add comment**. If the original file disappeared, select another file or discard the draft. Drafts whose file content is unchanged can still be submitted after refresh without choosing a new location.
+
 ### Refresh after repository changes
 
 Peer watches the active repository and shows a persistent **Repository changed on disk** notice in the status bar when files, staging, HEAD, or the selected comparison branch change. Detection never refreshes automatically: displayed source, the file list, drafts, Reviewed state, focus, and scroll remain untouched. Choose the notice's **Refresh** button, the toolbar, or ⌘/Ctrl R when ready. The notice clears only after a successful reload; failed refreshes keep it.
@@ -135,4 +137,3 @@ Diagnostics are recorded automatically in memory only, bounded to the latest 300
 Preferences, saved reviews, and imported themes stay in Peer's application-data directory, separate from your repositories. Existing RepoInspector data remains available without migration. Uninstalling the app does not remove this data.
 
 Files above 1 MiB or 20,000 lines require explicit loading. A 64 MiB inspection limit protects the viewer from very large files.
-
