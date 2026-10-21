@@ -747,10 +747,10 @@ export default function App() {
   );
   const submitComment = useCallback(async () => {
     const s = snapshotRef.current;
-    if (!s || saving || copying) return;
+    if (!s || busy || saving || copying) return;
     const draft = drafts[s.queueId];
     if (!draft?.body.trim()) return;
-    ++commentRequest.current;
+    const request = ++commentRequest.current;
     setSaving(true);
     try {
       let source = { snapshotId: draft.snapshotId, fileId: draft.fileId };
@@ -758,17 +758,17 @@ export default function App() {
         const entry = s.files.find((file) => file.path === draft.path);
         if (!entry)
           throw new Error(
-            "This file is no longer in the current view. Your draft has been kept.",
+            "This file is no longer in the current view. Choose a new comment location.",
           );
         const { content } = await loadFile(entry.id, true);
         if (content.fingerprint !== draft.fingerprint)
           throw new Error(
-            "The file changed since this draft was started. Your draft has been kept; review the file before starting a new comment.",
+            "The file changed since this draft was started. Choose a new comment location in the refreshed source.",
           );
         source = { snapshotId: s.id, fileId: entry.id };
       }
       await api.comment({
-        ...draft,
+        fingerprint: draft.fingerprint,
         ...source,
         body: draft.body,
         line: draft.line ?? null,
@@ -780,11 +780,22 @@ export default function App() {
       await reloadQueue();
       notify("Comment saved");
     } catch (e) {
-      reportError(e);
+      recordDiagnosticError("comment.submit.error", e);
+      const error = e instanceof Error ? e.message : String(e);
+      setDrafts((prev) => {
+        const current = prev[s.queueId];
+        if (
+          !current ||
+          request !== commentRequest.current ||
+          snapshotRef.current?.id !== s.id
+        )
+          return prev;
+        return { ...prev, [s.queueId]: { ...current, error } };
+      });
     } finally {
       setSaving(false);
     }
-  }, [drafts, loadFile, reloadQueue, notify, reportError, saving, copying]);
+  }, [drafts, loadFile, reloadQueue, notify, busy, saving, copying]);
   const markReviewed = useCallback(
     async (id: string, checked: boolean) => {
       const s = snapshotRef.current;
@@ -926,6 +937,12 @@ export default function App() {
 
   const selectedEntry = snapshot?.files.find((f) => f.id === selected);
   const selectedFile = selected ? loaded[selected] : undefined;
+  const draft = snapshot ? drafts[snapshot.queueId] : undefined;
+  const draftEntry = draft
+    ? snapshot?.files.find(
+        (file) => file.path === draft.path || file.oldPath === draft.path,
+      )
+    : undefined;
   const matches = useMemo(() => {
     if (navigation.file)
       return (navigation.file.content ?? "").split("\n").flatMap((line, i) =>
@@ -1570,10 +1587,11 @@ export default function App() {
                   key={snapshot.queueId}
                   queue={queue}
                   view={snapshot.comparison.view}
-                  draft={drafts[snapshot.queueId]}
+                  draft={draft}
                   focusRequest={commentFocusRequest}
                   busy={saving}
                   copying={copying}
+                  refreshing={busy}
                   onDraft={(draft) => {
                     if (!draft) ++commentRequest.current;
                     setDrafts((prev) => ({
@@ -1582,6 +1600,12 @@ export default function App() {
                     }));
                   }}
                   onSubmit={submitComment}
+                  onRefresh={refresh}
+                  onReviewDraft={
+                    draftEntry
+                      ? () => void navigation.review(draftEntry.id)
+                      : undefined
+                  }
                   onCopy={copyFeedback}
                   deleteAfterCopy={deleteAfterCopy}
                   onDeleteAfterCopyChange={setDeleteAfterCopy}

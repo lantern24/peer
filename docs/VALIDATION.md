@@ -2,6 +2,14 @@
 
 Reference machine: Apple M2, macOS 26.5.2 (25F84 / Darwin 25.5.0). The native app uses WKWebView with a configured 1440 × 940 window. The test-only configuration keeps its window above other windows to avoid occlusion-related rendering pauses; production windows retain normal behavior. Development tools: Rust 1.88 and Node.js 26.7.
 
+## Stale comment draft recovery — 2026-10-21 JST
+
+Issue #23's rejection is intentional: source fingerprints prevent a draft from attaching to changed code, including after Refresh. Submission failures now appear inside the draft editor with Refresh, Review file when available, and instructions for explicitly selecting a new line or file while keeping the text. The fingerprint checks remain unchanged.
+
+`npm test` passed all 37 frontend/harness tests. `npm run build` and `npm run build:test-app` passed. A focused native run passed 12 scenarios in `review.spec.ts`, including four new regressions: stale line drafts in Code and Changes, an unchanged draft after unrelated source changes, and a removed file's draft reused at an explicitly selected file. The stale-line scenarios insert a line, verify rejection before and after Refresh, then select the moved line and verify the saved path, side, line number, and source context. Existing focus, line/file retargeting, and outdated-feedback scenarios also passed.
+
+The Code and Changes screenshots were inspected in the actual macOS WKWebView: the retained draft, inline error, and recovery actions were visible beside the refreshed source. An initial native run exposed invalid selectors in the new tests; after correcting those selectors, all 12 scenarios passed together. This is focused local macOS verification, not a full desktop suite or Windows/Linux runtime check.
+
 ## User-exportable diagnostics — 2026-10-15 JST
 
 Settings → Diagnostics previews and exports a memory-only report containing native runtime versions, WebView capabilities, bounded navigation/read/parse/render/error events, and current viewer/worker state. The fatal-error screen exposes the same exporter. File identifiers are session-local numbers; source contents and review comments are not deliberately collected. Error messages and stacks are explicitly warned as potentially sensitive.
