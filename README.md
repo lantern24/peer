@@ -50,7 +50,7 @@ This removes the app bundle; saved review data and preferences are retained.
 
 ## Install on Linux
 
-Requirements: [Homebrew on Linux](https://docs.brew.sh/Homebrew-on-Linux) and an x86_64 (amd64) Linux system. Linux release builds use Ubuntu 22.04 as the build baseline; Linux ARM builds are not included.
+Requirements: [Homebrew on Linux](https://docs.brew.sh/Homebrew-on-Linux) and an x86_64 (amd64) or arm64 (aarch64) Linux system. Linux release builds use Ubuntu 22.04 as the build baseline.
 
 ```sh
 brew update

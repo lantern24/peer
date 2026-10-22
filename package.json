@@ -14,7 +14,7 @@
     "desktop": "tauri dev",
     "bundle": "tauri build --target aarch64-apple-darwin --bundles app",
     "bundle:dmg": "tauri build --target aarch64-apple-darwin --bundles app,dmg",
-    "bundle:linux": "tauri build --target x86_64-unknown-linux-gnu --bundles deb,appimage",
+    "bundle:linux": "tauri build --bundles deb,appimage",
     "icons": "node scripts/generate-icons.mjs",
     "build:test-app": "node scripts/build-test-app.mjs",
     "format": "prettier --write src scripts tests *.json *.ts *.md && cargo fmt --all"

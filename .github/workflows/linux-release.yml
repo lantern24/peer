@@ -1,4 +1,4 @@
-name: Package Linux (x86_64)
+name: Package Linux
 on:
   workflow_dispatch:
     inputs:
@@ -17,8 +17,25 @@ permissions:
 
 jobs:
   bundle:
+    name: Linux (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            deb-arch: amd64
+          - arch: arm64
+            runner: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+            deb-arch: arm64
     # Keep the glibc baseline compatible with Ubuntu 22.04 and Debian 12.
-    runs-on: ubuntu-22.04
+    runs-on: ${{ matrix.runner }}
+    env:
+      RUST_TARGET: ${{ matrix.target }}
+      DEB_ARCH: ${{ matrix.deb-arch }}
+      ASSET_NAME: Peer-Linux-${{ matrix.arch }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -26,36 +43,37 @@ jobs:
       - name: Install Linux packaging dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libfuse2 xdg-utils
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libfuse2 xdg-utils file
       - uses: dtolnay/rust-toolchain@stable
-        with: { targets: x86_64-unknown-linux-gnu }
+        with:
+          targets: ${{ matrix.target }}
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm }
       - uses: Swatinem/rust-cache@v2
       - run: npm ci
       - name: Build Linux packages
-        run: npm run bundle:linux
+        run: npm run bundle:linux -- --target "$RUST_TARGET"
         env:
           # Let AppImage packaging tools run without a FUSE mount.
           APPIMAGE_EXTRACT_AND_RUN: "1"
       - name: Prepare and verify release assets
         run: |
-          cp target/x86_64-unknown-linux-gnu/release/bundle/deb/*.deb Peer-Linux-x86_64.deb
-          cp target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.AppImage Peer-Linux-x86_64.AppImage
-          test "$(dpkg-deb --field Peer-Linux-x86_64.deb Architecture)" = amd64
-          dpkg-deb --info Peer-Linux-x86_64.deb
-          ./Peer-Linux-x86_64.AppImage --appimage-extract > /dev/null
+          cp "target/$RUST_TARGET/release/bundle/deb/"*.deb "$ASSET_NAME.deb"
+          cp "target/$RUST_TARGET/release/bundle/appimage/"*.AppImage "$ASSET_NAME.AppImage"
+          test "$(dpkg-deb --field "$ASSET_NAME.deb" Architecture)" = "$DEB_ARCH"
+          dpkg-deb --info "$ASSET_NAME.deb"
+          "./$ASSET_NAME.AppImage" --appimage-extract > /dev/null
           test -x squashfs-root/usr/bin/peer
       - uses: actions/upload-artifact@v4
         with:
-          name: Peer-Linux-x86_64
+          name: ${{ env.ASSET_NAME }}
           path: |
-            Peer-Linux-x86_64.deb
-            Peer-Linux-x86_64.AppImage
+            ${{ env.ASSET_NAME }}.deb
+            ${{ env.ASSET_NAME }}.AppImage
           if-no-files-found: error
       - name: Upload release assets
         if: inputs.release-tag != ''
-        run: gh release upload "$RELEASE_TAG" Peer-Linux-x86_64.deb Peer-Linux-x86_64.AppImage --clobber
+        run: gh release upload "$RELEASE_TAG" "$ASSET_NAME.deb" "$ASSET_NAME.AppImage" --clobber
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
