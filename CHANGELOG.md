@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/lantern24/peer/compare/v0.2.0...v0.2.1) (2026-10-22)
+
+
+### Bug Fixes
+
+* **issue-23:** Explain and recover stale comment drafts ([#24](https://github.com/lantern24/peer/issues/24)) ([5ffcbba](https://github.com/lantern24/peer/commit/5ffcbba3ec5d91742d0c3f64c982419bd4b17c7b)), closes [#23](https://github.com/lantern24/peer/issues/23)
+
 ## [0.2.0](https://github.com/lantern24/peer/compare/v0.1.3...v0.2.0) (2026-10-19)
 
 
