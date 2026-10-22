@@ -1368,6 +1368,43 @@ p {
   font-size: 15px;
   font-weight: 600;
 }
+.keyboard-shortcuts {
+  width: 900px;
+}
+.shortcut-groups {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
+  gap: 24px 32px;
+  padding: 0 20px 24px;
+}
+.shortcut-groups h3 {
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+.shortcut-groups dl {
+  margin: 0;
+}
+.shortcut-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+.shortcut-row dt {
+  min-width: 0;
+}
+.shortcut-row dd {
+  margin: 0;
+  flex-shrink: 0;
+}
+.shortcut-row kbd {
+  color: var(--fg);
+  font-size: 11px;
+}
 .settings-modal[open] {
   display: flex;
   flex-direction: column;

@@ -21,6 +21,7 @@ export const config = {
       : [
           "./review.spec.ts",
           "./sidebars.spec.ts",
+          "./shortcuts.spec.ts",
           "./navigation.spec.ts",
           "./repositories.spec.ts",
           "./history.spec.ts",

@@ -43,6 +43,7 @@ import { Feedback, type Draft } from "./Feedback";
 import { Settings, type SettingsTab } from "./Settings";
 import { Modal } from "./Modal";
 import { QuickOpen } from "./QuickOpen";
+import { KeyboardShortcuts } from "./KeyboardShortcuts";
 import { RepositorySwitcher } from "./RepositorySwitcher";
 import { RepositoryLocation } from "./RepositoryLocation";
 import { CommitHistory, commitDate } from "./CommitHistory";
@@ -54,7 +55,7 @@ import { useNavigation } from "./useNavigation";
 import { useRepositoryWatch } from "./useRepositoryWatch";
 import { NavigationSource } from "./NavigationSource";
 import { NavigationResults } from "./NavigationResults";
-import type { ViewportState } from "./navigation";
+import { isTyping, type ViewportState } from "./navigation";
 import { refreshedViewport } from "./refresh";
 import {
   diagnosticFile,
@@ -132,6 +133,7 @@ export default function App() {
   const [drafts, setDrafts] = useState<Record<string, Draft | undefined>>({});
   const [commentFocusRequest, setCommentFocusRequest] = useState(0);
   const [quickOpen, setQuickOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [findOpen, setFindOpen] = useState(false);
   const [repositoryToUpdate, setRepositoryToUpdate] = useState<string | null>(
     null,
@@ -678,6 +680,30 @@ export default function App() {
     });
     const keys = (e: KeyboardEvent) => {
       if (e.defaultPrevented || document.querySelector("dialog[open]")) return;
+      if (
+        e.key === "?" &&
+        !e.metaKey &&
+        !e.ctrlKey &&
+        !e.altKey &&
+        !e.isComposing &&
+        !e.repeat &&
+        !isTyping(e)
+      ) {
+        e.preventDefault();
+        // Menu items unmount on blur; let the dialog remember their trigger instead.
+        const popup = document.activeElement?.closest(
+          '[role="menu"], [role="dialog"]',
+        );
+        if (popup?.id) {
+          document
+            .querySelector<HTMLElement>(
+              `[aria-controls~="${CSS.escape(popup.id)}"]`,
+            )
+            ?.focus();
+        }
+        setShortcutsOpen(true);
+        return;
+      }
       if (e.key === "Escape" && !e.isComposing) {
         setFindOpen(false);
         return;
@@ -1723,6 +1749,9 @@ export default function App() {
             onSelect={selectFile}
             onClose={() => setQuickOpen(false)}
           />
+        )}
+        {shortcutsOpen && (
+          <KeyboardShortcuts onClose={() => setShortcutsOpen(false)} />
         )}
         {exportText !== null && (
           <Modal title="Feedback JSON" onClose={() => setExportText(null)}>
