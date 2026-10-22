@@ -2,6 +2,24 @@
 
 Reference machine: Apple M2, macOS 26.5.2 (25F84 / Darwin 25.5.0). The native app uses WKWebView with a configured 1440 × 940 window. The test-only configuration keeps its window above other windows to avoid occlusion-related rendering pauses; production windows retain normal behavior. Development tools: Rust 1.88 and Node.js 26.7.
 
+## Linux x86_64/arm64 release matrix — 2026-10-22 JST
+
+Linux release packaging now uses native `ubuntu-22.04` and `ubuntu-22.04-arm` matrix jobs with separate targets, Debian architecture checks, artifact names, and release assets. `fail-fast: false` lets either architecture complete if the other fails. The x86_64 asset names remain unchanged; arm64 adds `Peer-Linux-arm64.deb` and `Peer-Linux-arm64.AppImage`. `actionlint` 1.7.12 passed for the updated workflow and its Release Please caller.
+
+A native Ubuntu 22.04 arm64 container ran the workflow's dependency and build commands against the committed source plus the current packaging changes. The production frontend and native release compilation passed and produced the arm64 Debian package. AppImage packaging exposed a missing `file` utility in the minimal container; the workflow now installs it explicitly. After installing that dependency, the AppImage bundling step completed without recompiling or using architecture emulation.
+
+The matrix's actual **Prepare and verify release assets** script passed for both the newly built arm64 packages and the previously retained x86_64 packages. Debian architecture values were `arm64` and `amd64`, respectively, and both AppImages extracted with an executable `usr/bin/peer`. The arm64 AppImage runtime and extracted application were also identified as ARM aarch64 ELF binaries. All four packages are retained locally in `/tmp/peer-linux-release-artifacts/`.
+
+The x86_64 application was not rebuilt for this matrix change. This is local native-arm64 build and two-architecture package-handling verification, not a hosted matrix run, release upload, Homebrew installation, or Linux desktop UI check.
+
+## Linux release packaging — 2026-10-22 JST
+
+Release Please now invokes separate macOS arm64 and Linux x86_64 packaging workflows for the same release tag. Linux packaging uses Ubuntu 22.04 and produces a Debian package and AppImage; manual dispatch can build artifacts without publishing. `actionlint` 1.7.12 passed for all three release workflows, and `npm run tauri info` accepted the updated configuration.
+
+An isolated Ubuntu 22.04 x86_64 container on the Apple M2 ran the workflow's native-dependency, Rust, Node 22, and npm setup. `act` honored the checkout's explicit SHA rather than copying uncommitted changes, so the local package script and Tauri configuration were copied into that isolated checkout before building. `npm run bundle:linux` passed the production frontend and native release compilation and produced the `.deb`. AppImage packaging initially failed because the local VM's emulator registration rejected the AppImage `AI` ELF-header marker; adding a matcher for that marker allowed the unchanged AppImage bundling command to complete. This emulation adjustment is not part of the native x86_64 GitHub workflow.
+
+The workflow's actual **Prepare and verify release assets** script passed against both generated packages: Debian architecture was `amd64`, its dependencies included Git, WebKitGTK 4.1, and GTK 3, and the AppImage extracted with an executable `usr/bin/peer`. The packages were retained locally in `/tmp/peer-linux-release-artifacts/`. This is local build/package verification, not a successful end-to-end hosted Actions run, release upload, or Linux desktop UI check.
+
 ## Stale comment draft recovery — 2026-10-21 JST
 
 Issue #23's rejection is intentional: source fingerprints prevent a draft from attaching to changed code, including after Refresh. Submission failures now appear inside the draft editor with Refresh, Review file when available, and instructions for explicitly selecting a new line or file while keeping the text. The fingerprint checks remain unchanged.

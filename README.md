@@ -48,6 +48,19 @@ brew uninstall --cask lantern24/tap/peer
 
 This removes the app bundle; saved review data and preferences are retained.
 
+## Install on Linux
+
+Requirements: [Homebrew on Linux](https://docs.brew.sh/Homebrew-on-Linux) and an x86_64 (amd64) or arm64 (aarch64) Linux system. Linux release builds use Ubuntu 22.04 as the build baseline.
+
+```sh
+brew update
+brew install --formula lantern24/tap/peer
+```
+
+The fully qualified formula name adds the [Lantern24 tap](https://github.com/lantern24/homebrew-tap) automatically; a separate `brew tap` command is not needed. Launch Peer by running `peer`.
+
+Git is required. Automatic repository-change monitoring requires Git 2.42+; manual refresh remains available with older versions. Node.js and Rust are not required to run Peer, though optional code-navigation servers require their own toolchains.
+
 ## Documentation
 
 - [User manual](docs/USER_MANUAL.md): review workflow, code navigation, themes, diagnostic reports, and saved-data limits.

@@ -1,6 +1,6 @@
 # Peer user manual
 
-For installation and requirements, see the [README](../README.md#install-with-homebrew).
+For installation and requirements, see the README's [macOS](../README.md#install-with-homebrew) and [Linux](../README.md#install-on-linux) instructions.
 
 - [Review workflow](#review-workflow)
 - [Code navigation](#code-navigation)
