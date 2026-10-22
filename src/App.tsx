@@ -678,6 +678,11 @@ export default function App() {
       if (payload === "settings") setSettings("appearance");
       if (payload === "refresh") refresh();
     });
+    return () => {
+      void menu.then((unlisten) => unlisten());
+    };
+  }, [pickRepository, refresh]);
+  useEffect(() => {
     const keys = (e: KeyboardEvent) => {
       if (e.defaultPrevented || document.querySelector("dialog[open]")) return;
       if (
@@ -746,11 +751,8 @@ export default function App() {
       }
     };
     window.addEventListener("keydown", keys);
-    return () => {
-      void menu.then((unlisten) => unlisten());
-      window.removeEventListener("keydown", keys);
-    };
-  }, [pickRepository, refresh, openFind, changeComparison, busy]);
+    return () => window.removeEventListener("keydown", keys);
+  }, [openFind, changeComparison, busy]);
 
   const reloadQueue = useCallback(async () => {
     const s = snapshotRef.current;
