@@ -2,6 +2,14 @@
 
 Reference machine: Apple M2, macOS 26.5.2 (25F84 / Darwin 25.5.0). The native app uses WKWebView with a configured 1440 × 940 window. The test-only configuration keeps its window above other windows to avoid occlusion-related rendering pauses; production windows retain normal behavior. Development tools: Rust 1.88 and Node.js 26.7.
 
+## Linux release packaging — 2026-10-22 JST
+
+Release Please now invokes separate macOS arm64 and Linux x86_64 packaging workflows for the same release tag. Linux packaging uses Ubuntu 22.04 and produces a Debian package and AppImage; manual dispatch can build artifacts without publishing. `actionlint` 1.7.12 passed for all three release workflows, and `npm run tauri info` accepted the updated configuration.
+
+An isolated Ubuntu 22.04 x86_64 container on the Apple M2 ran the workflow's native-dependency, Rust, Node 22, and npm setup. `act` honored the checkout's explicit SHA rather than copying uncommitted changes, so the local package script and Tauri configuration were copied into that isolated checkout before building. `npm run bundle:linux` passed the production frontend and native release compilation and produced the `.deb`. AppImage packaging initially failed because the local VM's emulator registration rejected the AppImage `AI` ELF-header marker; adding a matcher for that marker allowed the unchanged AppImage bundling command to complete. This emulation adjustment is not part of the native x86_64 GitHub workflow.
+
+The workflow's actual **Prepare and verify release assets** script passed against both generated packages: Debian architecture was `amd64`, its dependencies included Git, WebKitGTK 4.1, and GTK 3, and the AppImage extracted with an executable `usr/bin/peer`. The packages were retained locally in `/tmp/peer-linux-release-artifacts/`. This is local build/package verification, not a successful end-to-end hosted Actions run, release upload, or Linux desktop UI check.
+
 ## Stale comment draft recovery — 2026-10-21 JST
 
 Issue #23's rejection is intentional: source fingerprints prevent a draft from attaching to changed code, including after Refresh. Submission failures now appear inside the draft editor with Refresh, Review file when available, and instructions for explicitly selecting a new line or file while keeping the text. The fingerprint checks remain unchanged.

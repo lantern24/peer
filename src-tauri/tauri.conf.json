@@ -43,6 +43,13 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "linux": {
+      "deb": {
+        "depends": [
+          "git"
+        ]
+      }
+    },
     "macOS": {
       "minimumSystemVersion": "13.0",
       "signingIdentity": "-"

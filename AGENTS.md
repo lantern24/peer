@@ -6,7 +6,7 @@ Peer is built with Tauri 2, React, TypeScript, and an independent Rust core. Pre
 
 ## Run and build
 
-Requirements: Node.js 22+, Rust 1.88+, Git, and [Tauri's platform prerequisites](https://v2.tauri.app/start/prerequisites/). Mac releases support Apple Silicon (arm64), with macOS 13 or later. Install Xcode Command Line Tools for macOS development.
+Requirements: Node.js 22+, Rust 1.88+, Git, and [Tauri's platform prerequisites](https://v2.tauri.app/start/prerequisites/). Mac releases support Apple Silicon (arm64), with macOS 13 or later. Install Xcode Command Line Tools for macOS development. Linux releases target x86_64 and are built on Ubuntu 22.04 to avoid requiring a newer glibc baseline.
 
 Automatic repository-change monitoring requires Git 2.42+ for attribute-path discovery. Unsupported Git versions report monitoring unavailable; manual refresh remains available.
 
@@ -26,6 +26,15 @@ npm run bundle:dmg
 
 The app is written to `target/aarch64-apple-darwin/release/bundle/macos/Peer.app`. The optional disk image is written to `target/aarch64-apple-darwin/release/bundle/dmg`. The executable is named `peer`. Both bundle commands default to ad-hoc signing (`bundle.macOS.signingIdentity: "-"`), which seals the complete app without Apple credentials. This provides signature integrity, not an Apple-verified publisher or notarization; macOS may still require explicit approval to open the app. For Developer ID signing and notarization, configure Tauri's `APPLE_SIGNING_IDENTITY`, certificate/password, and Apple notarization credentials. The environment signing identity overrides the ad-hoc default. `.github/workflows/macos-release.yml` reads these values from GitHub Actions secrets.
 
+Production Linux packages (on an x86_64 Linux host with Tauri's prerequisites installed):
+
+```sh
+rustup target add x86_64-unknown-linux-gnu
+npm run bundle:linux
+```
+
+The `.deb` and AppImage are written under `target/x86_64-unknown-linux-gnu/release/bundle/deb` and `target/x86_64-unknown-linux-gnu/release/bundle/appimage`. The Debian package declares Git as a runtime dependency; AppImage users must install Git separately. The Linux packaging workflow installs the WebKitGTK 4.1 and other native build dependencies. AppImage packaging uses `APPIMAGE_EXTRACT_AND_RUN=1` so its tools do not require a FUSE mount.
+
 The shared logo source is `assets/icon.svg`. After editing it, run `npm run icons` to regenerate the desktop icons; the header and welcome screen use the SVG directly.
 
 ## Releases
@@ -42,7 +51,12 @@ Repository setup:
 - For automatic CI on release PRs, add a `RELEASE_PLEASE_TOKEN` Actions secret containing a token with repository **Contents**, **Issues**, and **Pull requests** read/write permissions. Without it, the workflow uses `GITHUB_TOKEN`, whose generated PRs do not trigger other workflows. Run **Verify Peer** manually on the release PR branch before merging in that case.
 - Apple signing and notarization secrets remain optional, as described above; without them, release bundles are ad-hoc signed but not notarized.
 
-After creating a release, the release workflow directly calls `.github/workflows/macos-release.yml` to build its exact tag and attach `Peer-macOS-arm64.app.zip`. This does not rely on tag/release events, which `GITHUB_TOKEN` cannot use to trigger another workflow. Before uploading, the workflow runs `codesign --verify --deep --strict` on both the built app and a fresh extraction of the ZIP; signature failures stop publication. The ZIP preserves the app bundle's executable permissions and is also retained as an Actions artifact. To retry packaging/uploading an existing release, dispatch **Package macOS (Apple Silicon)** with its `release-tag`; leave that input blank for an artifact-only build of the selected branch.
+After creating a release, the release workflow directly calls both packaging workflows with its exact tag. This does not rely on tag/release events, which `GITHUB_TOKEN` cannot use to trigger another workflow:
+
+- `.github/workflows/macos-release.yml` builds `Peer-macOS-arm64.app.zip`. Before uploading, it runs `codesign --verify --deep --strict` on both the built app and a fresh extraction of the ZIP; signature failures stop publication. The ZIP preserves the app bundle's executable permissions.
+- `.github/workflows/linux-release.yml` builds `Peer-Linux-x86_64.deb` and `Peer-Linux-x86_64.AppImage` on Ubuntu 22.04. Before uploading, it checks the Debian package's architecture and metadata and extracts the AppImage to verify that it contains the executable.
+
+Both workflows retain their packages as Actions artifacts and attach them to the same GitHub release. To retry packaging/uploading an existing release, dispatch **Package macOS (Apple Silicon)** or **Package Linux (x86_64)** with its `release-tag`; leave that input blank for an artifact-only build of the selected branch. Linux packaging needs no additional secrets. Downloaded AppImage artifacts may need `chmod +x` before execution.
 
 ## Architecture and storage
 
@@ -122,4 +136,4 @@ caffeinate -d -i -u -t 1200 act push \
 
 Keep the desktop unlocked and avoid mouse/keyboard input throughout the run. `caffeinate` prevents idle sleep but cannot unlock an already locked session. This runs the workflow on your Mac, not in a GitHub VM or Docker container; its setup actions install/select host Rust and Node toolchains. Omit `--bind`: the native executor needs checkout to copy the working tree into its workspace. The local artifact server retains `desktop-test-results` under the specified directory.
 
-CI runs Rust core tests on macOS, Windows, and Linux, frontend tests/builds, and the macOS desktop suite. A dedicated Ubuntu job installs pinned Go/gopls, Node/TypeScript/typescript-language-server, Rust/rust-analyzer, and Python/Pyright toolchains and explicitly runs both real-server navigation tests; they remain opt-in for the ordinary local core suite. The pins live in `.github/workflows/ci.yml`. Windows/Linux desktop releases remain future work; a CI configuration is not evidence of a completed remote run.
+CI runs Rust core tests on macOS, Windows, and Linux, frontend tests/builds, and the macOS desktop suite. A dedicated Ubuntu job installs pinned Go/gopls, Node/TypeScript/typescript-language-server, Rust/rust-analyzer, and Python/Pyright toolchains and explicitly runs both real-server navigation tests; they remain opt-in for the ordinary local core suite. The pins live in `.github/workflows/ci.yml`. Release packaging covers macOS arm64 and Linux x86_64; Windows desktop releases and Linux desktop UI automation remain future work. A CI configuration is not evidence of a completed remote run.
