@@ -15,12 +15,19 @@ import { execFileSync } from "node:child_process";
 import { defaultComparison } from "../../src/types";
 import type { Preferences } from "../../src/types";
 import type * as TauriCore from "@tauri-apps/api/core";
+import type * as TauriEvent from "@tauri-apps/api/event";
 import type * as TauriWindow from "@tauri-apps/api/window";
 import { reloadApp } from "./app-fixture";
 
 // withGlobalTauri exposes these native APIs inside each executed webview callback.
 type NativeWindow = Window & {
-  __TAURI__: { core: typeof TauriCore; window: typeof TauriWindow };
+  __TAURI__: {
+    core: typeof TauriCore;
+    event: typeof TauriEvent;
+    window: typeof TauriWindow;
+  };
+  __TAURI_INTERNALS__: { convertFileSrc: typeof TauriCore.convertFileSrc };
+  __openGate?: { waiting: boolean; release?: () => void; restore: () => void };
 };
 
 const workspace = realpathSync(
@@ -270,6 +277,128 @@ describe("Repository switcher", () => {
     await $(trigger).click();
     await $(".statusbar").click();
     await expect($(menu)).not.toExist();
+  });
+
+  it("ignores Ctrl+T and keeps native menus active while opening a repository", async () => {
+    writeFileSync(
+      join(second, "first.ts"),
+      "export const destination = true;\n",
+    );
+    await browser.execute(() => {
+      const native = window as NativeWindow;
+      const originalFetch = window.fetch;
+      const url = native.__TAURI_INTERNALS__.convertFileSrc(
+        "open_repository",
+        "ipc",
+      );
+      const listenUrl = native.__TAURI_INTERNALS__.convertFileSrc(
+        "plugin:event|listen",
+        "ipc",
+      );
+      const pendingListeners: (() => void)[] = [];
+      const gate: NonNullable<NativeWindow["__openGate"]> = {
+        waiting: false,
+        restore: () => {
+          window.fetch = originalFetch;
+          gate.release?.();
+          for (const release of pendingListeners) release();
+          delete native.__openGate;
+        },
+      };
+      native.__openGate = gate;
+      // Hold the real request so the shortcut runs during the repository switch.
+      window.fetch = (input, init) => {
+        const target = input instanceof Request ? input.url : String(input);
+        // Expose any app-menu resubscription gap without mocking menu events.
+        if (target === listenUrl && typeof init?.body === "string") {
+          const args: unknown = JSON.parse(init.body);
+          if (
+            args &&
+            typeof args === "object" &&
+            "event" in args &&
+            args.event === "app-menu"
+          )
+            return new Promise<Response>((resolve) => {
+              pendingListeners.push(() => resolve(originalFetch(input, init)));
+            });
+        }
+        if (target !== url || gate.waiting) return originalFetch(input, init);
+        gate.waiting = true;
+        return new Promise<Response>((resolve) => {
+          gate.release = () => {
+            gate.release = undefined;
+            resolve(originalFetch(input, init));
+          };
+        });
+      };
+    });
+    try {
+      await $(trigger).click();
+      await $(`[data-repository-path="${second}"]`).click();
+      await browser.waitUntil(() =>
+        browser.execute(
+          () => (window as NativeWindow).__openGate?.waiting === true,
+        ),
+      );
+      await expect($(trigger)).toHaveAttribute("title", first);
+      await expect($('[aria-label="Refresh repository"]')).not.toBeEnabled();
+      await browser.execute(() => {
+        window.dispatchEvent(
+          new KeyboardEvent("keydown", {
+            key: "t",
+            ctrlKey: true,
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+      });
+      await browser.execute(async () => {
+        await (window as NativeWindow).__TAURI__.event.emit(
+          "app-menu",
+          "settings",
+        );
+      });
+      await $('dialog[aria-label="Settings"]').waitForDisplayed();
+      await browser.saveScreenshot(
+        resolve("test-results/native-menu-during-repository-open.png"),
+      );
+      await $(
+        'dialog[aria-label="Settings"] [aria-label="Close dialog"]',
+      ).click();
+      await browser.execute(() =>
+        (window as NativeWindow).__openGate?.release?.(),
+      );
+      await waitForRepository(second);
+      await browser.execute(async () => {
+        await (window as NativeWindow).__TAURI__.event.emit(
+          "app-menu",
+          "settings",
+        );
+      });
+      await $('dialog[aria-label="Settings"]').waitForDisplayed();
+      await $(
+        'dialog[aria-label="Settings"] [aria-label="Close dialog"]',
+      ).click();
+    } finally {
+      await browser.execute(() =>
+        (window as NativeWindow).__openGate?.restore(),
+      );
+    }
+    await waitForRepository(second);
+    await expect($(".view-switch button.active")).toHaveText("Changes");
+    await switchView("Code");
+    await browser.waitUntil(() =>
+      browser.execute(() =>
+        Array.from(document.querySelectorAll("diffs-container")).some((host) =>
+          host.shadowRoot
+            ?.querySelector("[data-code]")
+            ?.textContent?.includes("export const destination = true;"),
+        ),
+      ),
+    );
+    await browser.saveScreenshot(
+      resolve("test-results/ctrl-t-repository-switch.png"),
+    );
   });
 
   it("restores each repository's view, selected file, scroll and draft", async () => {

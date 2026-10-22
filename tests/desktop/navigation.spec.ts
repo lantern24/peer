@@ -279,6 +279,110 @@ describe("Version-aware navigation", () => {
     await reloadApp(originalPreferences);
   });
 
+  it("toggles Code and Changes with Ctrl+T without interrupting input", async () => {
+    await browser.execute(() => {
+      const select = document.querySelector<HTMLSelectElement>(
+        '[aria-label="Comparison mode"]',
+      );
+      if (!select) throw new Error("Missing comparison selector");
+      select.value = "unstaged";
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await expect($('[aria-label="Comparison mode"]')).toHaveValue("unstaged");
+    await $('[aria-label="Refresh repository"]').waitForEnabled();
+
+    const toggle = (options: KeyboardEventInit = {}, selector?: string) =>
+      browser.execute(
+        (options, selector) => {
+          const target = selector ? document.querySelector(selector) : window;
+          if (!target) throw new Error(`Missing shortcut target: ${selector}`);
+          const event = new KeyboardEvent("keydown", {
+            key: "t",
+            code: "KeyT",
+            ctrlKey: true,
+            bubbles: true,
+            composed: true,
+            cancelable: true,
+            ...options,
+          });
+          target.dispatchEvent(event);
+          return event.defaultPrevented;
+        },
+        options,
+        selector,
+      );
+    const expectView = async (view: "Code" | "Changes") => {
+      await browser.waitUntil(() =>
+        browser.execute(
+          (view) =>
+            document
+              .querySelector(".view-switch button.active")
+              ?.textContent?.trim() === view,
+          view,
+        ),
+      );
+      await $('[aria-label="Refresh repository"]').waitForEnabled();
+      await expect($('.tree-file[title="call.ts"]')).toHaveAttribute(
+        "aria-current",
+        "true",
+      );
+      await sourceContains("asdf(); // B");
+    };
+
+    expect(await toggle()).toBe(true);
+    await expectView("Code");
+    await expect($('.tree-file[title="keep.ts"]')).toExist();
+    await browser.saveScreenshot(resolve("test-results/ctrl-t-code.png"));
+    expect(await toggle()).toBe(true);
+    await expectView("Changes");
+    await expect($('[aria-label="Comparison mode"]')).toHaveValue("unstaged");
+    await expect($('.tree-file[title="keep.ts"]')).not.toExist();
+
+    for (const options of [
+      { ctrlKey: false },
+      { ctrlKey: false, metaKey: true },
+      { metaKey: true },
+      { shiftKey: true },
+      { altKey: true },
+      { repeat: true },
+      { isComposing: true },
+    ])
+      expect(await toggle(options)).toBe(false);
+    await expectView("Changes");
+
+    await $('[aria-label="Find in file"]').click();
+    await $('input[aria-label="Find in file"]').waitForDisplayed();
+    expect(await toggle({}, 'input[aria-label="Find in file"]')).toBe(false);
+    await expectView("Changes");
+    await $('[aria-label="Close search"]').click();
+    await key("p", true);
+    await $('[aria-label="Quick open file"]').waitForDisplayed();
+    expect(await toggle()).toBe(false);
+    await expectView("Changes");
+    await browser.keys("Escape");
+    await $('[aria-label="Quick open file"]').waitForExist({ reverse: true });
+
+    await $('[aria-label="Show branch commits"]').click();
+    await $(".commit-history-item").waitForDisplayed();
+    await browser.execute(() => {
+      document.querySelector<HTMLElement>(".commit-history-item")?.focus();
+    });
+    expect(await toggle({}, ".commit-history-item")).toBe(false);
+    await expect(
+      $('[role="dialog"][aria-label="Commit history"]'),
+    ).toBeDisplayed();
+    await expect($(".commit-history-item")).toBeFocused();
+    await expectView("Changes");
+    await browser.saveScreenshot(
+      resolve("test-results/ctrl-t-commit-history.png"),
+    );
+    await browser.keys("Escape");
+    await $('[role="dialog"][aria-label="Commit history"]').waitForExist({
+      reverse: true,
+    });
+    await browser.saveScreenshot(resolve("test-results/ctrl-t-changes.png"));
+  });
+
   it("renders definition tabs at the preferred width and respects EditorConfig", async () => {
     const tabColumns = () =>
       browser.execute(() => {

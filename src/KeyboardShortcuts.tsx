@@ -11,6 +11,7 @@ export function KeyboardShortcuts({ onClose }: { onClose: () => void }) {
         ["? (Shift+/)", "Show keyboard shortcuts"],
         [`${mod}+O`, "Open repository"],
         [`${mod}+R`, "Refresh repository"],
+        ["Ctrl+T", "Switch between Code and Changes"],
         [`${mod}+,`, "Open Settings"],
         ["Esc", "Close dialog, menu, or search"],
         ...(isMac ? ([["⌘+Q", "Quit Peer"]] satisfies [string, string][]) : []),

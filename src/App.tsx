@@ -678,6 +678,11 @@ export default function App() {
       if (payload === "settings") setSettings("appearance");
       if (payload === "refresh") refresh();
     });
+    return () => {
+      void menu.then((unlisten) => unlisten());
+    };
+  }, [pickRepository, refresh]);
+  useEffect(() => {
     const keys = (e: KeyboardEvent) => {
       if (e.defaultPrevented || document.querySelector("dialog[open]")) return;
       if (
@@ -708,6 +713,29 @@ export default function App() {
         setFindOpen(false);
         return;
       }
+      if (
+        e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey &&
+        !e.shiftKey &&
+        e.key.toLowerCase() === "t" &&
+        !e.isComposing &&
+        !e.repeat &&
+        !busy &&
+        !isTyping(e) &&
+        !document.querySelector('[role="dialog"]')
+      ) {
+        const s = snapshotRef.current;
+        if (s) {
+          e.preventDefault();
+          changeComparison(
+            s.comparison.view === "code"
+              ? lastChanges.current
+              : { ...defaultComparison, view: "code" },
+          );
+        }
+        return;
+      }
       if (!(e.metaKey || e.ctrlKey)) return;
       if (e.key.toLowerCase() === "p") {
         e.preventDefault();
@@ -723,11 +751,8 @@ export default function App() {
       }
     };
     window.addEventListener("keydown", keys);
-    return () => {
-      void menu.then((unlisten) => unlisten());
-      window.removeEventListener("keydown", keys);
-    };
-  }, [pickRepository, refresh, openFind]);
+    return () => window.removeEventListener("keydown", keys);
+  }, [openFind, changeComparison, busy]);
 
   const reloadQueue = useCallback(async () => {
     const s = snapshotRef.current;
@@ -1074,6 +1099,7 @@ export default function App() {
                   className={
                     snapshot.comparison.view === "code" ? "active" : ""
                   }
+                  title="Switch to Code (Ctrl+T)"
                   onClick={() =>
                     changeComparison({ ...defaultComparison, view: "code" })
                   }
@@ -1085,6 +1111,7 @@ export default function App() {
                   className={
                     snapshot.comparison.view === "changes" ? "active" : ""
                   }
+                  title="Switch to Changes (Ctrl+T)"
                   onClick={() => changeComparison(lastChanges.current)}
                 >
                   <FileDiff size={15} />

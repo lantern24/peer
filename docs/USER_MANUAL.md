@@ -27,6 +27,8 @@ For a deleted or unwanted repository, use its **Remove from list** × button. Re
 
 ### Choose a comparison
 
+Press **Ctrl+T** to switch between **Code** and **Changes**, including on macOS (Control, not Command). Returning to Changes restores the last comparison. The shortcut leaves text fields and open dialogs, including commit history, untouched. It is ignored while a repository is opening or refreshing.
+
 - **Code:** existing tracked files plus non-ignored untracked files in the working directory.
 - **All local changes:** HEAD against working files, combining staged and unstaged edits.
 - **Staged:** HEAD against the index. **Unstaged:** index against working files.

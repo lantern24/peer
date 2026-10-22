@@ -2,6 +2,12 @@
 
 Reference machine: Apple M2, macOS 26.5.2 (25F84 / Darwin 25.5.0). The native app uses WKWebView with a configured 1440 × 940 window. The test-only configuration keeps its window above other windows to avoid occlusion-related rendering pauses; production windows retain normal behavior. Development tools: Rust 1.88 and Node.js 26.7.
 
+## Native menu listener stability — 2026-10-23 JST
+
+PR #29's loading guard initially tied the native `app-menu` subscription to `busy`, creating an asynchronous unregister/register gap whenever repository loading started or finished. The subscription now has its own effect, independent of the keyboard handler's loading state.
+
+The native repository-switch regression delays replacement menu subscriptions and the real repository-open request, then emits the Settings command through Tauri while loading and after completion. Before the fix, Settings failed to open during loading; afterward, both deliveries opened Settings and the intended repository finished opening. The loading-state Settings screenshot was visually inspected. `npm run build:test-app` passed, and five targeted native scenarios passed together: this regression, Ctrl+T/dialog guards, welcome-screen shortcut help, and help focus restoration from both repository and commit menus. Coverage is local macOS WKWebView with automated keyboard input and real Tauri events, not physical menu clicks, Windows/Linux, or a hosted CI run.
+
 ## Keyboard-shortcuts popup — 2026-10-22 JST
 
 `npm run build:test-app` passed TypeScript/Vite compilation and the native desktop-test build. Both scenarios in `tests/desktop/shortcuts.spec.ts` passed in the macOS WKWebView across the initial run and a targeted rerun: typing/composition/modifier/dialog guards, and welcome-screen opening, focus containment/return, Escape and close-button dismissal, and scrolling at 950 × 640.
