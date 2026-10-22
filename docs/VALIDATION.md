@@ -2,6 +2,12 @@
 
 Reference machine: Apple M2, macOS 26.5.2 (25F84 / Darwin 25.5.0). The native app uses WKWebView with a configured 1440 × 940 window. The test-only configuration keeps its window above other windows to avoid occlusion-related rendering pauses; production windows retain normal behavior. Development tools: Rust 1.88 and Node.js 26.7.
 
+## Keyboard-shortcuts popup — 2026-10-22 JST
+
+`npm run build:test-app` passed TypeScript/Vite compilation and the native desktop-test build. Both scenarios in `tests/desktop/shortcuts.spec.ts` passed in the macOS WKWebView across the initial run and a targeted rerun: typing/composition/modifier/dialog guards, and welcome-screen opening, focus containment/return, Escape and close-button dismissal, and scrolling at 950 × 640.
+
+The initial welcome-screen scenario stopped in the shared reload helper because its empty recent-repository list intentionally disabled the repository switcher. Retaining recent entries while leaving no repository open corrected the fixture; the targeted rerun passed. Screenshots at 1440 × 940 and 950 × 640 were visually inspected. Keyboard input was synthesized by the desktop driver or DOM events; Windows/Linux runtimes and physical keyboard layouts were not exercised. This was a focused native run, not the full desktop suite.
+
 ## Linux x86_64/arm64 release matrix — 2026-10-22 JST
 
 Linux release packaging now uses native `ubuntu-22.04` and `ubuntu-22.04-arm` matrix jobs with separate targets, Debian architecture checks, artifact names, and release assets. `fail-fast: false` lets either architecture complete if the other fails. The x86_64 asset names remain unchanged; arm64 adds `Peer-Linux-arm64.deb` and `Peer-Linux-arm64.AppImage`. `actionlint` 1.7.12 passed for the updated workflow and its Release Please caller.
