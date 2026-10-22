@@ -716,7 +716,9 @@ export default function App() {
         e.key.toLowerCase() === "t" &&
         !e.isComposing &&
         !e.repeat &&
-        !isTyping(e)
+        !busy &&
+        !isTyping(e) &&
+        !document.querySelector('[role="dialog"]')
       ) {
         const s = snapshotRef.current;
         if (s) {
@@ -748,7 +750,7 @@ export default function App() {
       void menu.then((unlisten) => unlisten());
       window.removeEventListener("keydown", keys);
     };
-  }, [pickRepository, refresh, openFind, changeComparison]);
+  }, [pickRepository, refresh, openFind, changeComparison, busy]);
 
   const reloadQueue = useCallback(async () => {
     const s = snapshotRef.current;

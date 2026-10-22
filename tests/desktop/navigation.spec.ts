@@ -361,6 +361,25 @@ describe("Version-aware navigation", () => {
     await expectView("Changes");
     await browser.keys("Escape");
     await $('[aria-label="Quick open file"]').waitForExist({ reverse: true });
+
+    await $('[aria-label="Show branch commits"]').click();
+    await $(".commit-history-item").waitForDisplayed();
+    await browser.execute(() => {
+      document.querySelector<HTMLElement>(".commit-history-item")?.focus();
+    });
+    expect(await toggle({}, ".commit-history-item")).toBe(false);
+    await expect(
+      $('[role="dialog"][aria-label="Commit history"]'),
+    ).toBeDisplayed();
+    await expect($(".commit-history-item")).toBeFocused();
+    await expectView("Changes");
+    await browser.saveScreenshot(
+      resolve("test-results/ctrl-t-commit-history.png"),
+    );
+    await browser.keys("Escape");
+    await $('[role="dialog"][aria-label="Commit history"]').waitForExist({
+      reverse: true,
+    });
     await browser.saveScreenshot(resolve("test-results/ctrl-t-changes.png"));
   });
 
