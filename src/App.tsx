@@ -690,6 +690,17 @@ export default function App() {
         !isTyping(e)
       ) {
         e.preventDefault();
+        // Menu items unmount on blur; let the dialog remember their trigger instead.
+        const popup = document.activeElement?.closest(
+          '[role="menu"], [role="dialog"]',
+        );
+        if (popup?.id) {
+          document
+            .querySelector<HTMLElement>(
+              `[aria-controls~="${CSS.escape(popup.id)}"]`,
+            )
+            ?.focus();
+        }
         setShortcutsOpen(true);
         return;
       }

@@ -13,7 +13,7 @@ For installation and requirements, see the README's [macOS](../README.md#install
 
 Press **?** (**Shift+/** on a US keyboard) to open the keyboard-shortcuts reference, including from the welcome screen before opening a repository. The popup groups application commands, file search, code navigation, quick-open, comments and text editing, and keyboard controls for menus, tabs, sidebars, and scrolling. Key labels match the current platform.
 
-The help shortcut leaves text fields, editable content, and open dialogs untouched. Close the popup with **Esc**, its **Close dialog** button, or a click outside it; focus returns to the previously focused control. Scroll the list to see every group in smaller windows.
+The help shortcut leaves text fields, editable content, and open modal dialogs untouched. Close the popup with **Esc**, its **Close dialog** button, or a click outside it; focus returns to the previously focused control. When opened from a repository or commit menu, the menu closes and focus returns to its toolbar button instead. Scroll the list to see every group in smaller windows.
 
 ## Review workflow
 

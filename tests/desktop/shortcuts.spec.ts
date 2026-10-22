@@ -125,6 +125,50 @@ describe("Keyboard shortcut help in the native webview", () => {
     await expect($(settings)).toBeFocused();
   });
 
+  for (const menu of [
+    {
+      name: "repository",
+      trigger: '[aria-label="Switch repository"]',
+      panel: '[role="menu"][aria-label="Repositories"]',
+      item: '.repository-menu [role="menuitemradio"]',
+      dismiss: "escape",
+    },
+    {
+      name: "commit",
+      trigger: '[aria-label="Show branch commits"]',
+      panel: '[role="dialog"][aria-label="Commit history"]',
+      item: ".commit-history-panel [data-commit-id]",
+      dismiss: "button",
+    },
+  ]) {
+    it(`returns focus to the ${menu.name} trigger after opening help from its menu`, async () => {
+      await $('[data-repository="benchmark-repo"]').waitForExist();
+      await $('[aria-label="Refresh repository"]').waitForEnabled();
+      await $(menu.trigger).click();
+      await $(menu.item).waitForDisplayed();
+      await browser.execute((selector) => {
+        const item = document.querySelector<HTMLButtonElement>(selector);
+        if (!item) throw new Error(`Missing menu item: ${selector}`);
+        item.focus();
+      }, menu.item);
+      await expect($(menu.item)).toBeFocused();
+      await browser.keys(["Shift", "?"]);
+      await browser.releaseActions();
+      await expect($(dialog)).toBeDisplayed();
+      await $(menu.panel).waitForExist({ reverse: true });
+      await expect($(`${dialog} [aria-label="Close dialog"]`)).toBeFocused();
+      if (menu.dismiss === "escape") await browser.keys("Escape");
+      else await $(`${dialog} [aria-label="Close dialog"]`).click();
+      await $(dialog).waitForExist({ reverse: true });
+      await expect($(menu.trigger)).toBeFocused();
+      await browser.keys("ArrowDown");
+      await expect($(menu.panel)).toBeDisplayed();
+      await browser.saveScreenshot(
+        resolve(`test-results/keyboard-shortcuts-${menu.name}-focus.png`),
+      );
+    });
+  }
+
   it("leaves typing, composition, modified keys, and existing dialogs untouched", async () => {
     await $('[data-repository="benchmark-repo"]').waitForExist();
     await $('[aria-label="Refresh repository"]').waitForEnabled();
