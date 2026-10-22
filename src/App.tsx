@@ -708,6 +708,27 @@ export default function App() {
         setFindOpen(false);
         return;
       }
+      if (
+        e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey &&
+        !e.shiftKey &&
+        e.key.toLowerCase() === "t" &&
+        !e.isComposing &&
+        !e.repeat &&
+        !isTyping(e)
+      ) {
+        const s = snapshotRef.current;
+        if (s) {
+          e.preventDefault();
+          changeComparison(
+            s.comparison.view === "code"
+              ? lastChanges.current
+              : { ...defaultComparison, view: "code" },
+          );
+        }
+        return;
+      }
       if (!(e.metaKey || e.ctrlKey)) return;
       if (e.key.toLowerCase() === "p") {
         e.preventDefault();
@@ -727,7 +748,7 @@ export default function App() {
       void menu.then((unlisten) => unlisten());
       window.removeEventListener("keydown", keys);
     };
-  }, [pickRepository, refresh, openFind]);
+  }, [pickRepository, refresh, openFind, changeComparison]);
 
   const reloadQueue = useCallback(async () => {
     const s = snapshotRef.current;
@@ -1074,6 +1095,7 @@ export default function App() {
                   className={
                     snapshot.comparison.view === "code" ? "active" : ""
                   }
+                  title="Switch to Code (Ctrl+T)"
                   onClick={() =>
                     changeComparison({ ...defaultComparison, view: "code" })
                   }
@@ -1085,6 +1107,7 @@ export default function App() {
                   className={
                     snapshot.comparison.view === "changes" ? "active" : ""
                   }
+                  title="Switch to Changes (Ctrl+T)"
                   onClick={() => changeComparison(lastChanges.current)}
                 >
                   <FileDiff size={15} />
