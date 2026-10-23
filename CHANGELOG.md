@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.0](https://github.com/lantern24/peer/compare/v0.2.1...v0.3.0) (2026-10-23)
+
+
+### Features
+
+* Add keyboard shortcuts reference popup ([#27](https://github.com/lantern24/peer/issues/27)) ([b1c86b9](https://github.com/lantern24/peer/commit/b1c86b94cf47cb1a68640580521d71e24e7e839b))
+* **ui:** Add Ctrl+T tab switching ([#29](https://github.com/lantern24/peer/issues/29)) ([7d84a78](https://github.com/lantern24/peer/commit/7d84a78da2b1bbcaa73873760d0c4eb891f5f05d))
+
 ## [0.2.1](https://github.com/lantern24/peer/compare/v0.2.0...v0.2.1) (2026-10-22)
 
 
