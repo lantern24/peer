@@ -1178,10 +1178,20 @@ describe("Version-aware navigation", () => {
         const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
         const text = walker.nextNode();
         if (!text) throw new Error("Source text not rendered");
-        window.getSelection()?.setBaseAndExtent(text, 0, text, 4);
+        const selection = window.getSelection();
+        const destination = document.querySelector<HTMLButtonElement>(
+          '.tree-file[title="defs.ts"]',
+        );
+        if (!selection || !destination)
+          throw new Error("Selection or destination file is unavailable");
+        // Capture this fixture selection before a late highlight render can
+        // replace its text node between separate WebDriver commands.
+        selection.setBaseAndExtent(text, 0, text, 4);
+        if (selection.toString() !== "asdf")
+          throw new Error("Source selection fixture did not select asdf");
+        // This used to reject in history capture with legacy selection APIs.
+        destination.click();
       }, selectionApi);
-      // This used to reject while capturing history, before selecting or reading defs.ts.
-      await $('.tree-file[title="defs.ts"]').click();
       await expect($('.tree-file[title="defs.ts"]')).toHaveAttribute(
         "aria-current",
         "true",
@@ -1200,6 +1210,9 @@ describe("Version-aware navigation", () => {
           browser.execute(() => window.getSelection()?.toString() === "asdf"),
         );
       }
+      await browser.saveScreenshot(
+        resolve(`test-results/navigation-selection-${selectionApi}.png`),
+      );
       await browser.execute(() => window.getSelection()?.removeAllRanges());
       await $('.tree-file[title="defs.ts"]').click();
       await expect($('.tree-file[title="defs.ts"]')).toHaveAttribute(
