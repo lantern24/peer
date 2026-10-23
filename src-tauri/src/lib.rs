@@ -2,6 +2,7 @@ mod diagnostics;
 #[cfg(target_os = "macos")]
 mod macos_navigation;
 mod repository_watch;
+mod shortcuts;
 
 use peer_core::navigation::{NavigationError, NavigationFile, NavigationRequest, NavigationResult};
 use peer_core::{types::*, Inspector};
@@ -179,16 +180,27 @@ pub fn run() {
             app.manage(Inspector::new(directory)?);
             app.manage(repository_watch::RepositoryWatch::default());
             use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
-            let open =
-                MenuItem::with_id(app, "open", "Open Repository…", true, Some("CmdOrCtrl+O"))?;
-            let settings =
-                MenuItem::with_id(app, "settings", "Settings…", true, Some("CmdOrCtrl+,"))?;
+            let shortcuts = shortcuts::native_shortcuts()?;
+            let open = MenuItem::with_id(
+                app,
+                "open",
+                shortcuts.open_repository.menu_label,
+                true,
+                Some(shortcuts.open_repository.bindings[0].keys),
+            )?;
+            let settings = MenuItem::with_id(
+                app,
+                "settings",
+                shortcuts.settings.menu_label,
+                true,
+                Some(shortcuts.settings.bindings[0].keys),
+            )?;
             let refresh = MenuItem::with_id(
                 app,
                 "refresh",
-                "Refresh Repository",
+                shortcuts.refresh_repository.menu_label,
                 true,
-                Some("CmdOrCtrl+R"),
+                Some(shortcuts.refresh_repository.bindings[0].keys),
             )?;
             let about = PredefinedMenuItem::about(app, None, None)?;
             let separator = PredefinedMenuItem::separator(app)?;

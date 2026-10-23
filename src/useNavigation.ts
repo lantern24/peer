@@ -16,6 +16,7 @@ import type {
 } from "./types";
 import type { ViewerHandle, LoadedFile } from "./Viewer";
 import { SourceCache } from "./memory";
+import { matchesShortcut, shortcutLabel } from "./shortcuts";
 import {
   isTyping,
   NavigationHistory,
@@ -62,7 +63,6 @@ export function useNavigation({
   const [forwardLength, setForwardLength] = useState(0);
   const history = useRef(new NavigationHistory());
   const future = useRef(new NavigationHistory());
-  const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
   const cache = useRef(new SourceCache<NavigationFile>(8 * 1024 * 1024, 8));
   const pending = useRef<{
     state?: ViewportState;
@@ -407,59 +407,48 @@ export function useNavigation({
         event.isComposing ||
         isTyping(event) ||
         event.repeat;
-      if (event.key === "BrowserBack" || event.key === "BrowserForward") {
+      const browserKey = {
+        key: event.key,
+        ctrlKey: false,
+        metaKey: false,
+        altKey: false,
+        shiftKey: false,
+      };
+      if (
+        matchesShortcut("browserBack", browserKey) ||
+        matchesShortcut("browserForward", browserKey)
+      ) {
         // Cancel WebView history even when Peer must leave app history alone.
         event.preventDefault();
-        if (
-          !blocked &&
-          !event.altKey &&
-          !event.ctrlKey &&
-          !event.metaKey &&
-          !event.shiftKey
-        )
-          void (event.key === "BrowserBack" ? back() : forward());
+        if (!blocked) {
+          if (matchesShortcut("browserBack", event)) void back();
+          else if (matchesShortcut("browserForward", event)) void forward();
+        }
         return;
       }
       if (blocked) return;
-      const historyModifier =
-        !event.shiftKey &&
-        !event.ctrlKey &&
-        (isMac
-          ? event.metaKey && !event.altKey
-          : event.altKey && !event.metaKey);
-      if (historyModifier) {
-        const goBack = isMac
-          ? event.key === "[" || event.code === "BracketLeft"
-          : event.key === "ArrowLeft";
-        const goForward = isMac
-          ? event.key === "]" || event.code === "BracketRight"
-          : event.key === "ArrowRight";
-        if (goBack || goForward) {
-          event.preventDefault();
-          void (goBack ? back() : forward());
-          return;
-        }
+      const goBack = matchesShortcut("navigateBack", event);
+      const goForward = matchesShortcut("navigateForward", event);
+      if (goBack || goForward) {
+        event.preventDefault();
+        void (goBack ? back() : forward());
+        return;
       }
-      if (event.altKey) return;
-      if (event.key === "F12" && !event.ctrlKey && !event.metaKey) {
+      const references = matchesShortcut("navigateReferences", event);
+      if (matchesShortcut("navigateDefinition", event) || references) {
         const position = viewer.current?.sourcePosition();
         if (position) {
           event.preventDefault();
-          void navigate(position, event.shiftKey ? "references" : "auto");
+          void navigate(position, references ? "references" : "auto");
         }
-      } else if (
-        event.ctrlKey &&
-        !event.metaKey &&
-        !event.shiftKey &&
-        (event.key === "-" || event.code === "Minus")
-      ) {
+      } else if (matchesShortcut("navigateBackAlternative", event)) {
         event.preventDefault();
         void back();
       }
     };
     window.addEventListener("keydown", keys);
     return () => window.removeEventListener("keydown", keys);
-  }, [navigate, back, forward, isMac, viewer]);
+  }, [navigate, back, forward, viewer]);
   useEffect(() => {
     const mouseHistory = (event: MouseEvent) => {
       if (event.button !== 3 && event.button !== 4) return;
@@ -505,8 +494,8 @@ export function useNavigation({
     mountEpoch,
     historyLength,
     forwardLength,
-    backShortcut: isMac ? "⌘+[" : "Alt+←",
-    forwardShortcut: isMac ? "⌘+]" : "Alt+→",
+    backShortcut: shortcutLabel("navigateBack"),
+    forwardShortcut: shortcutLabel("navigateForward"),
     cancel,
     back,
     forward,

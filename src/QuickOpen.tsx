@@ -10,6 +10,7 @@ import { ChevronRight, Code2, Search } from "lucide-react";
 import { Modal } from "./Modal";
 import type { FileEntry } from "./types";
 import { SearchText, textMatches } from "./search";
+import { matchesShortcut } from "./shortcuts";
 
 export function QuickOpen({
   files,
@@ -42,21 +43,13 @@ export function QuickOpen({
     onClose();
   };
   const onKeyDown = (event: KeyboardEvent<HTMLElement>) => {
-    if (
-      event.nativeEvent.isComposing ||
-      event.altKey ||
-      event.metaKey ||
-      event.shiftKey
-    )
-      return;
-    const key = event.key.toLowerCase();
-    const direction =
-      key === "arrowdown" || (event.ctrlKey && key === "n")
-        ? 1
-        : key === "arrowup" || (event.ctrlKey && key === "p")
-          ? -1
-          : 0;
-    if (!direction && (key !== "enter" || event.ctrlKey)) return;
+    if (event.nativeEvent.isComposing) return;
+    const direction = matchesShortcut("quickNext", event)
+      ? 1
+      : matchesShortcut("quickPrevious", event)
+        ? -1
+        : 0;
+    if (!direction && !matchesShortcut("quickAccept", event)) return;
     event.preventDefault();
     event.stopPropagation();
     if (!results.length) return;

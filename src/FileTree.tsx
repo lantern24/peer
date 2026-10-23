@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import type { FileEntry, ReviewQueue } from "./types";
 import { SearchText, textMatches } from "./search";
+import { shortcutLabel } from "./shortcuts";
 
 type Props = {
   files: FileEntry[];
@@ -97,7 +98,7 @@ export function FileTree({ files, selected, queue, onSelect, view }: Props) {
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
         />
-        <kbd>⌘ P</kbd>
+        <kbd>{shortcutLabel("quickOpen")}</kbd>
       </label>
       <nav ref={tree} className="file-tree" aria-label="Repository files">
         {rows.map((row) =>

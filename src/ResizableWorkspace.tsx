@@ -12,6 +12,7 @@ import {
   minimumSourceWidth,
   sidebarLimits,
 } from "./sidebar-layout";
+import { matchesShortcut, shortcutLabel } from "./shortcuts";
 
 type Side = keyof SidebarWidths;
 type DividerProps = {
@@ -96,7 +97,7 @@ function SidebarDivider(props: DividerProps) {
       aria-valuenow={props.value}
       aria-valuetext={`${props.value} pixels`}
       tabIndex={0}
-      title="Drag or use arrow keys to resize. Double-click to reset."
+      title={`Drag or use ${shortcutLabel("resizeLeft")} / ${shortcutLabel("resizeRight")} to resize by 10 pixels, ${shortcutLabel("resizeLeftLarge")} / ${shortcutLabel("resizeRightLarge")} by 50 pixels. ${shortcutLabel("resizeMin")} / ${shortcutLabel("resizeMax")} for minimum / maximum. ${shortcutLabel("resizeCancel")} cancels dragging. Double-click to reset.`}
       onMouseDown={(event) => {
         // Some embedded hosts deliver only mouse events. Pointer-driven drags
         // already own the interaction and must not start a second drag here.
@@ -142,24 +143,25 @@ function SidebarDivider(props: DividerProps) {
         props.onCommit(constrain(defaultPreferences.sidebarWidths[props.side]))
       }
       onKeyDown={(event) => {
-        if (event.key === "Escape" && drag.current) {
+        if (matchesShortcut("resizeCancel", event) && drag.current) {
           event.preventDefault();
           finish(false);
           return;
         }
-        if (event.altKey || event.ctrlKey || event.metaKey || drag.current)
-          return;
-        const step = event.shiftKey ? 50 : 10;
-        const width =
-          event.key === "ArrowLeft"
-            ? props.value - direction * step
-            : event.key === "ArrowRight"
-              ? props.value + direction * step
-              : event.key === "Home"
-                ? min
-                : event.key === "End"
-                  ? props.max
-                  : null;
+        if (drag.current) return;
+        const width = matchesShortcut("resizeLeft", event)
+          ? props.value - direction * 10
+          : matchesShortcut("resizeRight", event)
+            ? props.value + direction * 10
+            : matchesShortcut("resizeLeftLarge", event)
+              ? props.value - direction * 50
+              : matchesShortcut("resizeRightLarge", event)
+                ? props.value + direction * 50
+                : matchesShortcut("resizeMin", event)
+                  ? min
+                  : matchesShortcut("resizeMax", event)
+                    ? props.max
+                    : null;
         if (width !== null) {
           event.preventDefault();
           props.onCommit(constrain(width));

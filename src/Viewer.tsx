@@ -31,6 +31,7 @@ import type {
 import { decorateWhitespace, whitespaceCSS } from "./whitespace";
 import { highlightSearchLine, searchCSS, type SourceMatch } from "./search";
 import { rendererThemeId, type Theme } from "./themes";
+import { matchesShortcut, shortcutLabel } from "./shortcuts";
 import {
   HorizontalScrollbar,
   type HorizontalScrollbarHandle,
@@ -470,7 +471,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
       if (!contextMenu) return;
       const close = () => setContextMenu(null);
       const keys = (event: KeyboardEvent) => {
-        if (event.key === "Escape") close();
+        if (matchesShortcut("close", event)) close();
       };
       window.addEventListener("click", close);
       window.addEventListener("keydown", keys);
@@ -1028,9 +1029,13 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
           );
           symbol.current = target;
           if (
-            /Mac|iPhone|iPad/.test(navigator.platform)
-              ? event.metaKey
-              : event.ctrlKey
+            matchesShortcut("navigateClick", {
+              key: "click",
+              ctrlKey: event.ctrlKey,
+              metaKey: event.metaKey,
+              altKey: event.altKey,
+              shiftKey: event.shiftKey,
+            })
           ) {
             event.preventDefault();
             refs.current.onNavigate?.(target, "auto");
@@ -1047,9 +1052,13 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
             symbol.current = target;
             if (
               !line.event.defaultPrevented &&
-              (/Mac|iPhone|iPad/.test(navigator.platform)
-                ? line.event.metaKey
-                : line.event.ctrlKey)
+              matchesShortcut("navigateClick", {
+                key: "click",
+                ctrlKey: line.event.ctrlKey,
+                metaKey: line.event.metaKey,
+                altKey: line.event.altKey,
+                shiftKey: line.event.shiftKey,
+              })
             ) {
               line.event.preventDefault();
               refs.current.onNavigate?.(target, "auto");
@@ -1149,7 +1158,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
             if (!button.dataset.inspectorKeyboard) {
               button.dataset.inspectorKeyboard = "true";
               button.addEventListener("keydown", (event) => {
-                if (event.key === "Enter" || event.key === " ") {
+                if (matchesShortcut("activate", event)) {
                   event.preventDefault();
                   event.stopPropagation();
                   button.click();
@@ -1400,7 +1409,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
                 ? `${snapshot.files.length} changed files · `
                 : ""}
               {props.navigationOnly
-                ? "Read-only source · Ctrl+- to go back"
+                ? `Read-only source · ${shortcutLabel("navigateBackAlternative")} to go back`
                 : "Read-only source · Your feedback is saved locally"}
             </div>
           )}
@@ -1427,7 +1436,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
                 refs.current.onNavigate?.(contextMenu.position, "auto")
               }
             >
-              Go to Definition <kbd>F12</kbd>
+              Go to Definition <kbd>{shortcutLabel("navigateDefinition")}</kbd>
             </button>
             <button
               role="menuitem"

@@ -7,6 +7,7 @@ import {
   Plus,
   X,
 } from "lucide-react";
+import { matchesShortcut, shortcutLabel } from "./shortcuts";
 
 export function RepositorySwitcher({
   current,
@@ -57,8 +58,13 @@ export function RepositorySwitcher({
         if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false);
       }}
       onKeyDown={(event) => {
-        if (open && (event.key === "Escape" || event.key === "Tab")) {
-          if (event.key === "Escape") {
+        if (
+          open &&
+          (matchesShortcut("close", event) ||
+            matchesShortcut("focusNext", event) ||
+            matchesShortcut("focusPrevious", event))
+        ) {
+          if (matchesShortcut("close", event)) {
             event.preventDefault();
             event.stopPropagation();
           }
@@ -81,10 +87,14 @@ export function RepositorySwitcher({
           setOpen((value) => !value);
         }}
         onKeyDown={(event) => {
-          if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+          if (
+            matchesShortcut("repositoryOpenFirst", event) ||
+            matchesShortcut("repositoryOpenLast", event)
+          ) {
             event.preventDefault();
-            initialFocus.current =
-              event.key === "ArrowUp" ? paths.length - 1 : 0;
+            initialFocus.current = matchesShortcut("repositoryOpenLast", event)
+              ? paths.length - 1
+              : 0;
             setOpen(true);
           }
         }}
@@ -96,7 +106,7 @@ export function RepositorySwitcher({
       <button
         className="icon-button repository-add"
         aria-label="Open repository"
-        title="Open another repository (⌘ O)"
+        title={`Open another repository (${shortcutLabel("openRepository")})`}
         disabled={disabled}
         onClick={() => {
           setOpen(false);
@@ -126,18 +136,22 @@ export function RepositorySwitcher({
                   event.target as HTMLButtonElement,
                 );
                 let next: number;
-                if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
-                  const direction = event.key === "ArrowRight" ? 1 : -1;
+                if (
+                  matchesShortcut("rowNext", event) ||
+                  matchesShortcut("rowPrevious", event)
+                ) {
+                  const direction = matchesShortcut("rowNext", event) ? 1 : -1;
                   buttons[
                     (column + direction + buttons.length) % buttons.length
                   ]?.focus();
                 } else {
-                  if (event.key === "ArrowDown")
+                  if (matchesShortcut("menuNext", event))
                     next = (index + 1) % paths.length;
-                  else if (event.key === "ArrowUp")
+                  else if (matchesShortcut("menuPrevious", event))
                     next = (index - 1 + paths.length) % paths.length;
-                  else if (event.key === "Home") next = 0;
-                  else if (event.key === "End") next = paths.length - 1;
+                  else if (matchesShortcut("menuFirst", event)) next = 0;
+                  else if (matchesShortcut("menuLast", event))
+                    next = paths.length - 1;
                   else return;
                   items.current[next]?.focus();
                 }
