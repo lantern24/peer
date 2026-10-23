@@ -44,6 +44,7 @@ import { Settings, type SettingsTab } from "./Settings";
 import { Modal } from "./Modal";
 import { QuickOpen } from "./QuickOpen";
 import { KeyboardShortcuts } from "./KeyboardShortcuts";
+import { matchesShortcut, shortcutLabel } from "./shortcuts";
 import { RepositorySwitcher } from "./RepositorySwitcher";
 import { RepositoryLocation } from "./RepositoryLocation";
 import { CommitHistory, commitDate } from "./CommitHistory";
@@ -686,10 +687,7 @@ export default function App() {
     const keys = (e: KeyboardEvent) => {
       if (e.defaultPrevented || document.querySelector("dialog[open]")) return;
       if (
-        e.key === "?" &&
-        !e.metaKey &&
-        !e.ctrlKey &&
-        !e.altKey &&
+        matchesShortcut("showShortcuts", e) &&
         !e.isComposing &&
         !e.repeat &&
         !isTyping(e)
@@ -709,16 +707,12 @@ export default function App() {
         setShortcutsOpen(true);
         return;
       }
-      if (e.key === "Escape" && !e.isComposing) {
+      if (matchesShortcut("close", e) && !e.isComposing) {
         setFindOpen(false);
         return;
       }
       if (
-        e.ctrlKey &&
-        !e.metaKey &&
-        !e.altKey &&
-        !e.shiftKey &&
-        e.key.toLowerCase() === "t" &&
+        matchesShortcut("toggleView", e) &&
         !e.isComposing &&
         !e.repeat &&
         !busy &&
@@ -736,16 +730,15 @@ export default function App() {
         }
         return;
       }
-      if (!(e.metaKey || e.ctrlKey)) return;
-      if (e.key.toLowerCase() === "p") {
+      if (matchesShortcut("quickOpen", e)) {
         e.preventDefault();
         setQuickOpen(true);
       }
-      if (e.key.toLowerCase() === "f") {
+      if (matchesShortcut("find", e)) {
         e.preventDefault();
         openFind("Find in file");
       }
-      if (e.key.toLowerCase() === "g") {
+      if (matchesShortcut("goToLine", e)) {
         e.preventDefault();
         openFind("Go to line");
       }
@@ -1056,7 +1049,7 @@ export default function App() {
           <div className="titlebar-actions">
             <button
               className="icon-button"
-              title="Settings (⌘ ,)"
+              title={`Settings (${shortcutLabel("settings")})`}
               aria-label="Settings"
               onClick={() => setSettings("appearance")}
             >
@@ -1079,7 +1072,7 @@ export default function App() {
               <button
                 className="icon-button"
                 aria-label="Go back"
-                title={`Go back (${navigation.backShortcut}; Ctrl+-)`}
+                title={`Go back (${navigation.backShortcut}; ${shortcutLabel("navigateBackAlternative")})`}
                 disabled={!navigation.historyLength}
                 onClick={() => void navigation.back()}
               >
@@ -1099,7 +1092,7 @@ export default function App() {
                   className={
                     snapshot.comparison.view === "code" ? "active" : ""
                   }
-                  title="Switch to Code (Ctrl+T)"
+                  title={`Switch to Code (${shortcutLabel("toggleView")})`}
                   onClick={() =>
                     changeComparison({ ...defaultComparison, view: "code" })
                   }
@@ -1111,7 +1104,7 @@ export default function App() {
                   className={
                     snapshot.comparison.view === "changes" ? "active" : ""
                   }
-                  title="Switch to Changes (Ctrl+T)"
+                  title={`Switch to Changes (${shortcutLabel("toggleView")})`}
                   onClick={() => changeComparison(lastChanges.current)}
                 >
                   <FileDiff size={15} />
@@ -1133,7 +1126,7 @@ export default function App() {
               <div className="toolbar-spacer" />
               <button
                 className="icon-button"
-                title="Find in file (⌘ F)"
+                title={`Find in file (${shortcutLabel("find")})`}
                 aria-label="Find in file"
                 onClick={() =>
                   findOpen ? setFindOpen(false) : openFind("Find in file")
@@ -1143,7 +1136,7 @@ export default function App() {
               </button>
               <button
                 className="icon-button"
-                title="Refresh repository (⌘ R)"
+                title={`Refresh repository (${shortcutLabel("refreshRepository")})`}
                 aria-label="Refresh repository"
                 disabled={busy}
                 onClick={refresh}
@@ -1221,7 +1214,7 @@ export default function App() {
               ) : (
                 <FolderOpen size={17} />
               )}
-              Open repository<kbd>⌘ O</kbd>
+              Open repository<kbd>{shortcutLabel("openRepository")}</kbd>
             </button>
             {preferences.recentRepositories.length > 0 && (
               <div className="recent-repositories">
@@ -1354,7 +1347,7 @@ export default function App() {
                     {preferences.diffLayout === "unified" && (
                       <select
                         aria-label="Navigation side for shared lines"
-                        title="Version used by F12 on unchanged lines"
+                        title={`Version used by ${shortcutLabel("navigateDefinition")} on unchanged lines`}
                         value={navigationSide}
                         onChange={(event) =>
                           setNavigationSide(event.target.value as "old" | "new")
@@ -1486,9 +1479,13 @@ export default function App() {
                       setMatchIndex(-1);
                     }}
                     onKeyDown={(e) => {
-                      if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+                      const previous = matchesShortcut("findPrevious", e);
+                      if (
+                        (matchesShortcut("findNext", e) || previous) &&
+                        !e.nativeEvent.isComposing
+                      ) {
                         e.preventDefault();
-                        jumpMatch(matchIndex + (e.shiftKey ? -1 : 1));
+                        jumpMatch(matchIndex + (previous ? -1 : 1));
                       }
                     }}
                   />
@@ -1520,7 +1517,7 @@ export default function App() {
                     value={lineInput}
                     onChange={(e) => setLineInput(e.target.value)}
                     onKeyDown={(e) => {
-                      if (e.key === "Enter") {
+                      if (matchesShortcut("lineAccept", e)) {
                         e.preventDefault();
                         if (
                           selected &&

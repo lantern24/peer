@@ -89,6 +89,14 @@ Definition and reference requests retry the LSP `ContentModified` response when 
 
 Installed JavaScript dependency trees are copied into the temporary workspace, with package links to repository files redirected to the selected snapshot. Their copy budget is 2 GiB; preparing a large installation can take time. Files over 64 MiB are excluded from analysis; large source previews retain the viewer's explicit-load behavior. Absolute imports that resolve back into live repository source are rejected instead of opening the wrong revision. Symbol navigation does not change repository files, Git's index, or review fingerprints.
 
+### Keyboard shortcut registry
+
+[`src/shortcuts.json`](src/shortcuts.json) owns shortcut IDs, action descriptions, groups, platform bindings, and native menu labels. [`src/shortcuts.ts`](src/shortcuts.ts) derives key matching, displayed key labels, and the complete help list from it. Components call `matchesShortcut` and `shortcutLabel` by ID; keep context guards (focus, typing, dialogs, composition, repeat, and loading) with the action. Adding a registry entry automatically adds its help row; do not maintain a second list in `KeyboardShortcuts.tsx` or hard-code shortcut hints in controls.
+
+Bindings use `+`-separated modifiers (`CmdOrCtrl`, `Cmd`, `Ctrl`, `Alt`, `Shift`) followed by a key. `CmdOrCtrl` selects Command on macOS and Control elsewhere. Bindings can restrict `platforms` (`mac`, `windows`, `linux`) or specify a physical `code` alias. Extra modifiers are rejected unless explicitly allowed; `optionalModifiers`, `allowExtraModifiers`, and `eitherMod` preserve the existing control-specific behavior. `system` entries document OS/WebView-owned editing, activation, and focus shortcuts rather than overriding native behavior.
+
+[`src-tauri/src/shortcuts.rs`](src-tauri/src/shortcuts.rs) embeds the same JSON for the Open, Refresh, and Settings menus. Each of these native commands has exactly one Tauri-compatible accelerator and a `menuLabel`. Changes to native bindings require rebuilding the app; no generated shortcut list needs updating.
+
 ### Mouse navigation
 
 - **Shared handling on macOS, Windows, and Linux:** [src/useNavigation.ts](src/useNavigation.ts) handles standard mouse Back / Forward button events and `BrowserBack` / `BrowserForward` key events delivered to the WebView. Mouse buttons mapped to the [navigation shortcuts](docs/USER_MANUAL.md#code-navigation) use the existing keyboard navigation path.

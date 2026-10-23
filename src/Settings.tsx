@@ -13,6 +13,7 @@ import { themeVariables, type Theme } from "./themes";
 import { Modal } from "./Modal";
 import { NavigationSettings } from "./NavigationSettings";
 import { DiagnosticReport } from "./DiagnosticReport";
+import { matchesShortcut } from "./shortcuts";
 
 const tabs = [
   { id: "appearance", label: "Appearance" },
@@ -88,17 +89,15 @@ export function Settings({
               event.currentTarget.focus();
             }}
             onKeyDown={(event) => {
-              if (event.altKey || event.ctrlKey || event.metaKey) return;
-              const next =
-                event.key === "ArrowRight"
-                  ? (index + 1) % tabs.length
-                  : event.key === "ArrowLeft"
-                    ? (index + tabs.length - 1) % tabs.length
-                    : event.key === "Home"
-                      ? 0
-                      : event.key === "End"
-                        ? tabs.length - 1
-                        : null;
+              const next = matchesShortcut("tabNext", event)
+                ? (index + 1) % tabs.length
+                : matchesShortcut("tabPrevious", event)
+                  ? (index + tabs.length - 1) % tabs.length
+                  : matchesShortcut("tabFirst", event)
+                    ? 0
+                    : matchesShortcut("tabLast", event)
+                      ? tabs.length - 1
+                      : null;
               if (next === null) return;
               event.preventDefault();
               setTab(tabs[next].id);

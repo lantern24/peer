@@ -10,6 +10,7 @@ import {
   Send,
 } from "lucide-react";
 import type { ReviewComment, ReviewQueue } from "./types";
+import { matchesShortcut } from "./shortcuts";
 
 export type Draft = {
   fileId: string;
@@ -168,7 +169,7 @@ export function Feedback({
               value={draft.body}
               onChange={(e) => onDraft({ ...draft, body: e.target.value })}
               onKeyDown={(e) => {
-                if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                if (matchesShortcut("saveComment", e)) {
                   e.preventDefault();
                   onSubmit();
                 }

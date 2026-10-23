@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { defaultPreferences, type LanguageServer } from "./types";
+import { shortcutLabel } from "./shortcuts";
 
 function serverDraft(servers: LanguageServer[]): LanguageServer[] {
   const ids = new Set(servers.map((server) => server.id));
@@ -124,8 +125,9 @@ export function NavigationSettings({
         <div>
           <h3>Code navigation</h3>
           <p>
-            F12 goes to definitions. Ctrl+- goes back. Install language servers
-            and toolchains locally.
+            {shortcutLabel("navigateDefinition")} goes to definitions.{" "}
+            {shortcutLabel("navigateBackAlternative")} goes back. Install
+            language servers and toolchains locally.
           </p>
           <p>
             Missing presets appear disabled. Enable and save them to add support

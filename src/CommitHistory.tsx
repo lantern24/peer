@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { api } from "./api";
 import type { Commit, Snapshot } from "./types";
+import { matchesShortcut } from "./shortcuts";
 
 export function commitDate(value: string) {
   const date = new Date(value);
@@ -91,7 +92,7 @@ export function CommitHistory({
         if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false);
       }}
       onKeyDown={(event) => {
-        if (open && event.key === "Escape") {
+        if (open && matchesShortcut("close", event)) {
           event.preventDefault();
           event.stopPropagation();
           setOpen(false);
@@ -110,7 +111,7 @@ export function CommitHistory({
         title={`View commits in ${branch}`}
         onClick={() => setOpen((value) => !value)}
         onKeyDown={(event) => {
-          if (event.key === "ArrowDown") {
+          if (matchesShortcut("commitOpen", event)) {
             event.preventDefault();
             setOpen(true);
           }
@@ -129,7 +130,12 @@ export function CommitHistory({
           tabIndex={-1}
           ref={panel}
           onKeyDown={(event) => {
-            if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key))
+            if (
+              !matchesShortcut("menuNext", event) &&
+              !matchesShortcut("menuPrevious", event) &&
+              !matchesShortcut("menuFirst", event) &&
+              !matchesShortcut("menuLast", event)
+            )
               return;
             const items = Array.from(
               event.currentTarget.querySelectorAll<HTMLButtonElement>(
@@ -140,16 +146,15 @@ export function CommitHistory({
             const index = items.indexOf(
               document.activeElement as HTMLButtonElement,
             );
-            const next =
-              event.key === "Home"
-                ? 0
-                : event.key === "End"
-                  ? items.length - 1
-                  : event.key === "ArrowDown"
-                    ? (index + 1) % items.length
-                    : index <= 0
-                      ? items.length - 1
-                      : index - 1;
+            const next = matchesShortcut("menuFirst", event)
+              ? 0
+              : matchesShortcut("menuLast", event)
+                ? items.length - 1
+                : matchesShortcut("menuNext", event)
+                  ? (index + 1) % items.length
+                  : index <= 0
+                    ? items.length - 1
+                    : index - 1;
             event.preventDefault();
             event.stopPropagation();
             items[next]?.focus();

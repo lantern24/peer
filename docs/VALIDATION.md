@@ -2,6 +2,20 @@
 
 Reference machine: Apple M2, macOS 26.5.2 (25F84 / Darwin 25.5.0). The native app uses WKWebView with a configured 1440 × 940 window. The test-only configuration keeps its window above other windows to avoid occlusion-related rendering pauses; production windows retain normal behavior. Development tools: Rust 1.88 and Node.js 26.7.
 
+## Selection compatibility fixture race — 2026-10-23 JST
+
+[PR #30's desktop CI run](https://github.com/lantern24/peer/actions/runs/39876985007/job/120164859089?pr=30) returned to the correct Code file but timed out waiting for the legacy-WebKit fixture's `asdf` selection. A local timing probe held and released the real syntax-highlight worker request: highlighting detached the selected text node before the separate WebDriver navigation command, leaving no source selection for history to capture. This reproduced the same timeout without changing application code.
+
+The compatibility fixture now sets and verifies its selection and clicks the destination in one browser task, before asynchronous highlighting can invalidate the setup. It retains the file/content checks, Back shortcut, exact restored-selection assertion, unavailable-API case, and navigation without selection. Both API cases passed with the controlled late-highlight probe after the change; all temporary worker hooks and diagnostic probes were removed. This fixes test setup ordering, not general selection persistence during background highlighting.
+
+With the probes removed, `PEER_PERFORMANCE_MODE=report npm run test:desktop` passed all 80 scenarios across all eight specs, including all 20 navigation scenarios. The legacy and unavailable-API screenshots were inspected, and focused formatting checks passed. Application code was unchanged, so this run reused the native test binary built for the registry change. Runtime coverage remains local macOS WKWebView, with the older selection APIs emulated.
+
+## Shared keyboard shortcut registry — 2026-10-23 JST
+
+`npm run build:test-app` passed TypeScript/Vite compilation and the native desktop-test build with the shared registry embedded for Open, Refresh, and Settings accelerators. All five `src/shortcuts.test.ts` cases passed, covering modifier precedence, platform-specific history, physical-key aliases, literal question marks, and quick-open/editor commands. A throwaway script changed one registry entry in memory before loading its consumers: matching, the tooltip label, and the generated help row changed together, and the former binding stopped matching. The script was removed afterward.
+
+Nineteen targeted native scenarios passed across `shortcuts`, `navigation`, `sidebars`, `history`, `repositories`, and `review`: popup focus/dismissal/input guards, Code/Changes switching, definitions/references, history, quick-open selection, keyboard resizing, menu navigation, Settings tabs, horizontal scrolling, and line jumps. The 1440 × 940 and 950 × 640 popup screenshots were visually inspected. These checks ran in macOS WKWebView with synthesized input; Windows/Linux history bindings were emulated through `navigator.platform`, not exercised on those operating systems. Native menu command delivery used Tauri events rather than physical menu clicks.
+
 ## Native menu listener stability — 2026-10-23 JST
 
 PR #29's loading guard initially tied the native `app-menu` subscription to `busy`, creating an asynchronous unregister/register gap whenever repository loading started or finished. The subscription now has its own effect, independent of the keyboard handler's loading state.

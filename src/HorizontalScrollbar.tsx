@@ -4,6 +4,7 @@ import {
   useLayoutEffect,
   useRef,
 } from "react";
+import { matchesShortcut, shortcutLabel } from "./shortcuts";
 
 export type HorizontalScrollbarHandle = {
   refresh: (preservePosition?: boolean) => void;
@@ -198,20 +199,25 @@ export const HorizontalScrollbar = forwardRef<
       className="viewer-horizontal-scrollbar"
       role="region"
       aria-label={`Scroll code horizontally${path ? `: ${path}` : ""}`}
-      title="Scroll horizontally · Arrow keys, Home or End"
+      title={`Scroll horizontally · ${shortcutLabel("scrollLeft")} / ${shortcutLabel("scrollRight")}, ${shortcutLabel("scrollPageLeft")} / ${shortcutLabel("scrollPageRight")}, ${shortcutLabel("scrollStart")} / ${shortcutLabel("scrollEnd")}`}
       onKeyDown={(event) => {
         const element = event.currentTarget;
-        const positions: Record<string, number> = {
-          ArrowLeft: element.scrollLeft - 40,
-          ArrowRight: element.scrollLeft + 40,
-          Home: 0,
-          End: element.scrollWidth,
-          PageUp: element.scrollLeft - element.clientWidth,
-          PageDown: element.scrollLeft + element.clientWidth,
-        };
-        if (event.key in positions) {
+        const position = matchesShortcut("scrollLeft", event)
+          ? element.scrollLeft - 40
+          : matchesShortcut("scrollRight", event)
+            ? element.scrollLeft + 40
+            : matchesShortcut("scrollStart", event)
+              ? 0
+              : matchesShortcut("scrollEnd", event)
+                ? element.scrollWidth
+                : matchesShortcut("scrollPageLeft", event)
+                  ? element.scrollLeft - element.clientWidth
+                  : matchesShortcut("scrollPageRight", event)
+                    ? element.scrollLeft + element.clientWidth
+                    : null;
+        if (position !== null) {
           event.preventDefault();
-          move.current(positions[event.key]);
+          move.current(position);
         }
       }}
     >

@@ -1,0 +1,343 @@
+{
+  "showShortcuts": {
+    "group": "Application",
+    "action": "Show keyboard shortcuts",
+    "bindings": [{ "keys": "?", "optionalModifiers": ["Shift"] }]
+  },
+  "openRepository": {
+    "group": "Application",
+    "action": "Open repository",
+    "menuLabel": "Open Repository…",
+    "bindings": [{ "keys": "CmdOrCtrl+O" }]
+  },
+  "refreshRepository": {
+    "group": "Application",
+    "action": "Refresh repository",
+    "menuLabel": "Refresh Repository",
+    "bindings": [{ "keys": "CmdOrCtrl+R" }]
+  },
+  "toggleView": {
+    "group": "Application",
+    "action": "Switch between Code and Changes",
+    "bindings": [{ "keys": "Ctrl+T" }]
+  },
+  "settings": {
+    "group": "Application",
+    "action": "Open Settings",
+    "menuLabel": "Settings…",
+    "bindings": [{ "keys": "CmdOrCtrl+," }]
+  },
+  "close": {
+    "group": "Application",
+    "action": "Close dialog, menu, or search",
+    "bindings": [{ "keys": "Escape", "allowExtraModifiers": true }]
+  },
+  "quit": {
+    "group": "Application",
+    "action": "Quit Peer",
+    "system": true,
+    "bindings": [{ "keys": "Cmd+Q", "platforms": ["mac"] }]
+  },
+  "quickOpen": {
+    "group": "Files and search",
+    "action": "Quick-open file",
+    "bindings": [
+      { "keys": "CmdOrCtrl+P", "eitherMod": true, "allowExtraModifiers": true }
+    ]
+  },
+  "find": {
+    "group": "Files and search",
+    "action": "Find in file",
+    "bindings": [
+      { "keys": "CmdOrCtrl+F", "eitherMod": true, "allowExtraModifiers": true }
+    ]
+  },
+  "goToLine": {
+    "group": "Files and search",
+    "action": "Go to line",
+    "bindings": [
+      { "keys": "CmdOrCtrl+G", "eitherMod": true, "allowExtraModifiers": true }
+    ]
+  },
+  "findNext": {
+    "group": "Files and search",
+    "action": "Next match in Find",
+    "bindings": [
+      { "keys": "Enter", "optionalModifiers": ["Ctrl", "Cmd", "Alt"] }
+    ]
+  },
+  "findPrevious": {
+    "group": "Files and search",
+    "action": "Previous match in Find",
+    "bindings": [
+      { "keys": "Shift+Enter", "optionalModifiers": ["Ctrl", "Cmd", "Alt"] }
+    ]
+  },
+  "lineAccept": {
+    "group": "Files and search",
+    "action": "Jump from Go to line",
+    "bindings": [{ "keys": "Enter", "allowExtraModifiers": true }]
+  },
+  "navigateDefinition": {
+    "group": "Code navigation",
+    "action": "Go to definition; at a definition, find references",
+    "bindings": [{ "keys": "F12" }]
+  },
+  "navigateReferences": {
+    "group": "Code navigation",
+    "action": "Find references",
+    "bindings": [{ "keys": "Shift+F12" }]
+  },
+  "navigateClick": {
+    "group": "Code navigation",
+    "action": "Go to definition",
+    "bindings": [{ "keys": "CmdOrCtrl+click", "allowExtraModifiers": true }]
+  },
+  "navigateBack": {
+    "group": "Code navigation",
+    "action": "Go back",
+    "bindings": [
+      { "keys": "Cmd+[", "code": "BracketLeft", "platforms": ["mac"] },
+      { "keys": "Alt+ArrowLeft", "platforms": ["windows", "linux"] }
+    ]
+  },
+  "navigateForward": {
+    "group": "Code navigation",
+    "action": "Go forward",
+    "bindings": [
+      { "keys": "Cmd+]", "code": "BracketRight", "platforms": ["mac"] },
+      { "keys": "Alt+ArrowRight", "platforms": ["windows", "linux"] }
+    ]
+  },
+  "navigateBackAlternative": {
+    "group": "Code navigation",
+    "action": "Go back (alternative)",
+    "bindings": [{ "keys": "Ctrl+-", "code": "Minus" }]
+  },
+  "browserBack": {
+    "group": "Code navigation",
+    "action": "Go back (browser key)",
+    "bindings": [{ "keys": "BrowserBack" }]
+  },
+  "browserForward": {
+    "group": "Code navigation",
+    "action": "Go forward (browser key)",
+    "bindings": [{ "keys": "BrowserForward" }]
+  },
+  "quickPrevious": {
+    "group": "In quick-open",
+    "action": "Previous file",
+    "bindings": [
+      { "keys": "ArrowUp", "optionalModifiers": ["Ctrl"] },
+      { "keys": "Ctrl+P" }
+    ]
+  },
+  "quickNext": {
+    "group": "In quick-open",
+    "action": "Next file",
+    "bindings": [
+      { "keys": "ArrowDown", "optionalModifiers": ["Ctrl"] },
+      { "keys": "Ctrl+N" }
+    ]
+  },
+  "quickAccept": {
+    "group": "In quick-open",
+    "action": "Open highlighted file",
+    "bindings": [{ "keys": "Enter" }]
+  },
+  "saveComment": {
+    "group": "Comments and text editing",
+    "action": "Save comment from its editor",
+    "bindings": [
+      {
+        "keys": "CmdOrCtrl+Enter",
+        "eitherMod": true,
+        "allowExtraModifiers": true
+      }
+    ]
+  },
+  "clipboard": {
+    "group": "Comments and text editing",
+    "action": "Cut / copy / paste text",
+    "system": true,
+    "bindings": [
+      { "keys": "CmdOrCtrl+X" },
+      { "keys": "CmdOrCtrl+C" },
+      { "keys": "CmdOrCtrl+V" }
+    ]
+  },
+  "selectAll": {
+    "group": "Comments and text editing",
+    "action": "Select all text",
+    "system": true,
+    "bindings": [{ "keys": "CmdOrCtrl+A" }]
+  },
+  "undo": {
+    "group": "Comments and text editing",
+    "action": "Undo text edit",
+    "system": true,
+    "bindings": [{ "keys": "CmdOrCtrl+Z", "platforms": ["mac", "windows"] }]
+  },
+  "redo": {
+    "group": "Comments and text editing",
+    "action": "Redo text edit",
+    "system": true,
+    "bindings": [
+      { "keys": "Cmd+Shift+Z", "platforms": ["mac"] },
+      { "keys": "Ctrl+Y", "platforms": ["windows"] }
+    ]
+  },
+  "resizeLeft": {
+    "group": "Focused sidebar divider",
+    "action": "Move divider left by 10 px",
+    "bindings": [{ "keys": "ArrowLeft" }]
+  },
+  "resizeRight": {
+    "group": "Focused sidebar divider",
+    "action": "Move divider right by 10 px",
+    "bindings": [{ "keys": "ArrowRight" }]
+  },
+  "resizeLeftLarge": {
+    "group": "Focused sidebar divider",
+    "action": "Move divider left by 50 px",
+    "bindings": [{ "keys": "Shift+ArrowLeft" }]
+  },
+  "resizeRightLarge": {
+    "group": "Focused sidebar divider",
+    "action": "Move divider right by 50 px",
+    "bindings": [{ "keys": "Shift+ArrowRight" }]
+  },
+  "resizeMin": {
+    "group": "Focused sidebar divider",
+    "action": "Minimum width",
+    "bindings": [{ "keys": "Home", "optionalModifiers": ["Shift"] }]
+  },
+  "resizeMax": {
+    "group": "Focused sidebar divider",
+    "action": "Maximum width",
+    "bindings": [{ "keys": "End", "optionalModifiers": ["Shift"] }]
+  },
+  "resizeCancel": {
+    "group": "Focused sidebar divider",
+    "action": "Cancel an active resize drag",
+    "bindings": [{ "keys": "Escape", "allowExtraModifiers": true }]
+  },
+  "repositoryOpenFirst": {
+    "group": "Repository menu, commits, and Settings",
+    "action": "Open repository menu at first item",
+    "bindings": [{ "keys": "ArrowDown", "allowExtraModifiers": true }]
+  },
+  "repositoryOpenLast": {
+    "group": "Repository menu, commits, and Settings",
+    "action": "Open repository menu at last item",
+    "bindings": [{ "keys": "ArrowUp", "allowExtraModifiers": true }]
+  },
+  "commitOpen": {
+    "group": "Repository menu, commits, and Settings",
+    "action": "Open focused commit menu",
+    "bindings": [{ "keys": "ArrowDown", "allowExtraModifiers": true }]
+  },
+  "menuPrevious": {
+    "group": "Repository menu, commits, and Settings",
+    "action": "Previous repository or commit",
+    "bindings": [{ "keys": "ArrowUp", "allowExtraModifiers": true }]
+  },
+  "menuNext": {
+    "group": "Repository menu, commits, and Settings",
+    "action": "Next repository or commit",
+    "bindings": [{ "keys": "ArrowDown", "allowExtraModifiers": true }]
+  },
+  "menuFirst": {
+    "group": "Repository menu, commits, and Settings",
+    "action": "First repository or commit",
+    "bindings": [{ "keys": "Home", "allowExtraModifiers": true }]
+  },
+  "menuLast": {
+    "group": "Repository menu, commits, and Settings",
+    "action": "Last repository or commit",
+    "bindings": [{ "keys": "End", "allowExtraModifiers": true }]
+  },
+  "rowPrevious": {
+    "group": "Repository menu, commits, and Settings",
+    "action": "Previous repository row action",
+    "bindings": [{ "keys": "ArrowLeft", "allowExtraModifiers": true }]
+  },
+  "rowNext": {
+    "group": "Repository menu, commits, and Settings",
+    "action": "Next repository row action",
+    "bindings": [{ "keys": "ArrowRight", "allowExtraModifiers": true }]
+  },
+  "tabPrevious": {
+    "group": "Repository menu, commits, and Settings",
+    "action": "Previous Settings tab",
+    "bindings": [{ "keys": "ArrowLeft", "optionalModifiers": ["Shift"] }]
+  },
+  "tabNext": {
+    "group": "Repository menu, commits, and Settings",
+    "action": "Next Settings tab",
+    "bindings": [{ "keys": "ArrowRight", "optionalModifiers": ["Shift"] }]
+  },
+  "tabFirst": {
+    "group": "Repository menu, commits, and Settings",
+    "action": "First Settings tab",
+    "bindings": [{ "keys": "Home", "optionalModifiers": ["Shift"] }]
+  },
+  "tabLast": {
+    "group": "Repository menu, commits, and Settings",
+    "action": "Last Settings tab",
+    "bindings": [{ "keys": "End", "optionalModifiers": ["Shift"] }]
+  },
+  "activate": {
+    "group": "Repository menu, commits, and Settings",
+    "action": "Activate focused button",
+    "system": true,
+    "bindings": [
+      { "keys": "Enter", "allowExtraModifiers": true },
+      { "keys": "Space", "allowExtraModifiers": true }
+    ]
+  },
+  "focusNext": {
+    "group": "Repository menu, commits, and Settings",
+    "action": "Focus next control",
+    "system": true,
+    "bindings": [{ "keys": "Tab", "optionalModifiers": ["Ctrl", "Cmd", "Alt"] }]
+  },
+  "focusPrevious": {
+    "group": "Repository menu, commits, and Settings",
+    "action": "Focus previous control",
+    "system": true,
+    "bindings": [
+      { "keys": "Shift+Tab", "optionalModifiers": ["Ctrl", "Cmd", "Alt"] }
+    ]
+  },
+  "scrollLeft": {
+    "group": "Focused horizontal scrollbar",
+    "action": "Scroll left",
+    "bindings": [{ "keys": "ArrowLeft", "allowExtraModifiers": true }]
+  },
+  "scrollRight": {
+    "group": "Focused horizontal scrollbar",
+    "action": "Scroll right",
+    "bindings": [{ "keys": "ArrowRight", "allowExtraModifiers": true }]
+  },
+  "scrollPageLeft": {
+    "group": "Focused horizontal scrollbar",
+    "action": "Scroll left by one page",
+    "bindings": [{ "keys": "PageUp", "allowExtraModifiers": true }]
+  },
+  "scrollPageRight": {
+    "group": "Focused horizontal scrollbar",
+    "action": "Scroll right by one page",
+    "bindings": [{ "keys": "PageDown", "allowExtraModifiers": true }]
+  },
+  "scrollStart": {
+    "group": "Focused horizontal scrollbar",
+    "action": "Scroll to start",
+    "bindings": [{ "keys": "Home", "allowExtraModifiers": true }]
+  },
+  "scrollEnd": {
+    "group": "Focused horizontal scrollbar",
+    "action": "Scroll to end",
+    "bindings": [{ "keys": "End", "allowExtraModifiers": true }]
+  }
+}
