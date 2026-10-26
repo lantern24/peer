@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/lantern24/peer/compare/v0.3.0...v0.3.1) (2026-10-26)
+
+
+### Bug Fixes
+
+* **viewer:** Preserve comments after symbol navigation ([#32](https://github.com/lantern24/peer/issues/32)) ([44811d2](https://github.com/lantern24/peer/commit/44811d266986b748de7ff85ff08fbb2bc8684913)), closes [#31](https://github.com/lantern24/peer/issues/31)
+
 ## [0.3.0](https://github.com/lantern24/peer/compare/v0.2.1...v0.3.0) (2026-10-23)
 
 
