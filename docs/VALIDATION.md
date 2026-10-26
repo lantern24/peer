@@ -2,6 +2,14 @@
 
 Reference machine: Apple M2, macOS 26.5.2 (25F84 / Darwin 25.5.0). The native app uses WKWebView with a configured 1440 × 940 window. The test-only configuration keeps its window above other windows to avoid occlusion-related rendering pauses; production windows retain normal behavior. Development tools: Rust 1.88 and Node.js 26.7.
 
+## Navigation comment hover tracking — 2026-10-26 JST
+
+Follow-up testing of issue #31 found that navigation's programmatic line selection pinned the gutter **+** to the destination. The renderer prioritizes its selected line over pointer hover. Symbol jumps now retain the symbol's text selection without creating a renderer line selection, including when a jump is deferred or restored through history. Explicit Go to Line and ordinary line selection keep their existing behavior.
+
+The navigation comment regressions now move the pointer over multiple non-destination source lines without clicking, check the button's vertical alignment and disappearance on pointer exit, retain the `asdf` text selection, and save feedback against the hovered line. They exercise Code, both Changes sides, definition/reference destinations, and Back. The shared click helper also checks that the visible button belongs to the requested line instead of accepting any visible gutter button. Code and old-side hover screenshots were visually inspected.
+
+`npm test` passed all 42 frontend/harness tests, and `npm run build:test-app` rebuilt the native executable. The final focused macOS WKWebView run passed all 24 navigation scenarios and seven review scenarios covering Code/unified/split comment controls and line jumps. The first run had three animation-frame waits time out and one assertion run against the outgoing diff while navigation was still preparing. The fixture now focuses the replacement document after reload, matching the review suite, and waits for the source-page header before checking hover. Four targeted regressions then passed, followed by the complete focused run. This is local native verification with synthesized input and the protocol fixture, not physical-pointer or Windows/Linux coverage.
+
 ## Comments after symbol navigation — 2026-10-26 JST
 
 Issue #31's definition/reference source pages disabled comment controls even when their destination belonged to the active review. Those pages now expose line and file comments through the existing snapshot-backed composer, switch the results sidebar to Feedback on comment actions, and render saved annotations for the displayed side. Renamed old-side destinations use the current comparison path. Unchanged files absent from Changes and external dependencies remain navigation-only; Code can review unchanged repository files.

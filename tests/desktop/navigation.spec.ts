@@ -182,6 +182,45 @@ async function sourceContains(text: string) {
   );
 }
 
+async function expectCommentHover(path: string, line?: number) {
+  const state = await browser.execute(
+    (path, line) => {
+      const host = document
+        .querySelector(`[data-file-path="${path}"]`)
+        ?.closest("diffs-container");
+      const pre = host?.shadowRoot?.querySelector("pre");
+      if (!pre) throw new Error("Source is not rendered");
+      const target =
+        line === null
+          ? pre
+          : pre.querySelector(`[data-line="${line}"][data-line-type]`);
+      if (!target) throw new Error("Hover line is not rendered");
+      target.dispatchEvent(
+        new PointerEvent(line === null ? "pointerleave" : "pointermove", {
+          bubbles: true,
+          composed: true,
+          pointerType: "mouse",
+          pointerId: 1,
+        }),
+      );
+      const button = host?.querySelector<HTMLButtonElement>(
+        '[aria-label="Comment on line"]',
+      );
+      const rect = button?.getBoundingClientRect();
+      const row = target.getBoundingClientRect();
+      const centerY = rect ? rect.top + rect.height / 2 : 0;
+      return {
+        visible: !!rect?.height,
+        aligned: !!rect?.height && centerY >= row.top && centerY < row.bottom,
+      };
+    },
+    path,
+    line ?? null,
+  );
+  expect(state.visible).toBe(line !== undefined);
+  if (line !== undefined) expect(state.aligned).toBe(true);
+}
+
 async function clickInPlace(selector: string) {
   // Centering a virtualized header can change the active file or evict it.
   await $(selector).waitForEnabled();
@@ -263,9 +302,6 @@ describe("Version-aware navigation", () => {
     };
   });
   beforeEach(async () => {
-    await browser.execute(async () => {
-      await (window as any).__TAURI__.window.getCurrentWindow().setFocus();
-    });
     const saved: { queues: Record<string, ReviewQueue> } = JSON.parse(
       readFileSync(join(process.env.PEER_DATA_DIR!, "state.json"), "utf8"),
     );
@@ -280,6 +316,9 @@ describe("Version-aware navigation", () => {
         });
     }, Object.keys(saved.queues));
     await reloadApp(scenarioPreferences);
+    await browser.execute(async () => {
+      await (window as any).__TAURI__.window.getCurrentWindow().setFocus();
+    });
     await switchView("Changes");
     await $('.tree-file[title="call.ts"]').click();
     await expect($('.tree-file[title="call.ts"]')).toHaveAttribute(
@@ -319,8 +358,19 @@ describe("Version-aware navigation", () => {
         : (["old", "new"] as const)) {
         await symbol("asdf", side);
         await key("F12");
+        await $(".navigation-version").waitForExist();
         await sourceContains(side === "old" ? "version A" : "version B");
-        const line = side === "old" ? 2 : 3;
+        const line = side === "old" ? 3 : 4;
+        await expectCommentHover("defs.ts");
+        await expectCommentHover("defs.ts", 1);
+        await expectCommentHover("defs.ts", line);
+        expect(
+          await browser.execute(() => window.getSelection()?.toString()),
+        ).toBe("asdf");
+        await browser.saveScreenshot(
+          resolve(`test-results/navigation-hover-${view}-${side}.png`),
+        );
+        await expectCommentHover("defs.ts");
         await clickLineComment(line, "context", "defs.ts");
         await expect($(".comment-composer .comment-path")).toHaveText(
           "defs.ts",
@@ -334,7 +384,12 @@ describe("Version-aware navigation", () => {
         await $('[aria-label="References"]').waitForExist();
         await $(".navigation-result").click();
         await sourceContains(side === "old" ? "asdf(); // A" : "asdf(); // B");
-        await clickLineComment(1, "context", "call.ts");
+        const referenceLine = side === "old" ? 2 : 3;
+        await expectCommentHover("call.ts");
+        await expectCommentHover("call.ts", 4);
+        await expectCommentHover("call.ts", referenceLine);
+        await expectCommentHover("call.ts");
+        await clickLineComment(referenceLine, "context", "call.ts");
         await expect($('[aria-label="References"]')).not.toExist();
         await expect($(".comment-composer .comment-path")).toHaveText(
           "call.ts",
@@ -351,6 +406,8 @@ describe("Version-aware navigation", () => {
         await browser.keys("Retained draft");
         await $('[aria-label="Go back"]').click();
         await sourceContains(side === "old" ? "version A" : "version B");
+        await expectCommentHover("defs.ts", line);
+        await expectCommentHover("defs.ts");
         await $('[aria-label="Go back"]').click();
         if (view === "Changes")
           await $('[aria-label="Comparison mode"]').waitForExist();
@@ -379,16 +436,14 @@ describe("Version-aware navigation", () => {
         const definition = body.includes("definition");
         const old = body.includes("old");
         expect(comment?.path).toBe(definition ? "defs.ts" : "call.ts");
-        expect(comment?.anchor.line).toBe(definition ? (old ? 2 : 3) : 1);
+        expect(comment?.anchor.line).toBe(
+          definition ? (old ? 3 : 4) : old ? 2 : 3,
+        );
         expect(comment?.anchor.side).toBe(
           view === "Code" ? undefined : old ? "old" : "new",
         );
         expect(comment?.anchor.lineText).toBe(
-          definition
-            ? "export function asdf() {"
-            : old
-              ? "asdf(); // A"
-              : "asdf(); // B",
+          definition ? `\treturn 'version ${old ? "A" : "B"}';` : "keep();",
         );
       }
     });

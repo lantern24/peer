@@ -64,6 +64,10 @@ export async function clickLineComment(
       if (!button || !button.getBoundingClientRect().height)
         throw new Error("Line comment button is not visible");
       const rect = button.getBoundingClientRect();
+      const row = gutter.getBoundingClientRect();
+      const centerY = rect.top + rect.height / 2;
+      if (centerY < row.top || centerY >= row.bottom)
+        throw new Error("Line comment button is not on the hovered line");
       const pointer = {
         bubbles: true,
         composed: true,

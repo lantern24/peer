@@ -154,6 +154,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
       id: string;
       line?: number;
       side?: "old" | "new";
+      selectLine: boolean;
     } | null>(null);
     const pendingFindScroll = useRef<SourceMatch | null>(null);
     const searchedNodes = useRef(new WeakSet<HTMLElement>());
@@ -504,7 +505,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
     }, [pool, theme, onError]);
 
     const navigate = useCallback(
-      (id: string, line?: number, side?: "old" | "new") => {
+      (id: string, line?: number, side?: "old" | "new", selectLine = true) => {
         const handle = viewer.current;
         recordDiagnostic("viewer.jump", {
           ...diagnosticFile(refs.current.snapshot, id),
@@ -545,29 +546,33 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
             align: "center",
             behavior: "instant",
           });
-          handle.setSelectedLines({
-            id,
-            range: {
-              start: line,
-              end: line,
-              ...(refs.current.snapshot.comparison.view === "changes"
-                ? {
-                    side:
-                      side === "old"
-                        ? ("deletions" as const)
-                        : ("additions" as const),
-                  }
-                : {}),
-            },
-          });
-          setSelectedLine({ id, line, side });
+          handle.setSelectedLines(
+            selectLine
+              ? {
+                  id,
+                  range: {
+                    start: line,
+                    end: line,
+                    ...(refs.current.snapshot.comparison.view === "changes"
+                      ? {
+                          side:
+                            side === "old"
+                              ? ("deletions" as const)
+                              : ("additions" as const),
+                        }
+                      : {}),
+                  },
+                }
+              : null,
+          );
+          setSelectedLine(selectLine ? { id, line, side } : null);
           instance?.render(true);
         }
       },
       [],
     );
     const jump = useCallback(
-      (id: string, line?: number, side?: "old" | "new") => {
+      (id: string, line?: number, side?: "old" | "new", selectLine = true) => {
         targetRange.current = null;
         restoring.current = null;
         horizontalScrollbar.current?.restore(null);
@@ -583,8 +588,10 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
           content.deferred ||
           collapsed.has(id) ||
           viewer.current?.getInstance()?.getTopForItem(id) === undefined;
-        pendingJump.current = needsRetry ? { id, line, side } : null;
-        navigate(id, line, side);
+        pendingJump.current = needsRetry
+          ? { id, line, side, selectLine }
+          : null;
+        navigate(id, line, side, selectLine);
         refs.current.onLoad(id);
       },
       [navigate, collapsed],
@@ -611,7 +618,9 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
         jump,
         sourcePosition,
         reveal: (id, range, side) => {
-          jump(id, range.start.line + 1, side);
+          // The symbol highlight identifies the destination. A renderer line
+          // selection would pin the comment utility instead of following hover.
+          jump(id, range.start.line + 1, side, false);
           symbol.current = { id, side: side ?? "new", position: range.start };
           targetRange.current = { id, range, side: side ?? "new" };
           queueMicrotask(highlightTarget);
@@ -834,7 +843,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
     useEffect(() => {
       const target = pendingJump.current;
       if (target && loaded[target.id] && !loaded[target.id].content.deferred) {
-        navigate(target.id, target.line, target.side);
+        navigate(target.id, target.line, target.side, target.selectLine);
         pendingJump.current = null;
       }
     }, [items, loaded, navigate, selected]);
