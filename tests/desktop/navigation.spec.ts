@@ -1,11 +1,11 @@
 import { browser, $, expect } from "@wdio/globals";
 import type { invoke } from "@tauri-apps/api/core";
-import type { Preferences } from "../../src/types";
+import type { Preferences, ReviewQueue } from "../../src/types";
 import { mkdtempSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { execFileSync } from "node:child_process";
-import { reloadApp } from "./app-fixture";
+import { clickLineComment, reloadApp } from "./app-fixture";
 
 let originalPreferences: any;
 let scenarioPreferences: Preferences;
@@ -182,6 +182,45 @@ async function sourceContains(text: string) {
   );
 }
 
+async function expectCommentHover(path: string, line?: number) {
+  const state = await browser.execute(
+    (path, line) => {
+      const host = document
+        .querySelector(`[data-file-path="${path}"]`)
+        ?.closest("diffs-container");
+      const pre = host?.shadowRoot?.querySelector("pre");
+      if (!pre) throw new Error("Source is not rendered");
+      const target =
+        line === null
+          ? pre
+          : pre.querySelector(`[data-line="${line}"][data-line-type]`);
+      if (!target) throw new Error("Hover line is not rendered");
+      target.dispatchEvent(
+        new PointerEvent(line === null ? "pointerleave" : "pointermove", {
+          bubbles: true,
+          composed: true,
+          pointerType: "mouse",
+          pointerId: 1,
+        }),
+      );
+      const button = host?.querySelector<HTMLButtonElement>(
+        '[aria-label="Comment on line"]',
+      );
+      const rect = button?.getBoundingClientRect();
+      const row = target.getBoundingClientRect();
+      const centerY = rect ? rect.top + rect.height / 2 : 0;
+      return {
+        visible: !!rect?.height,
+        aligned: !!rect?.height && centerY >= row.top && centerY < row.bottom,
+      };
+    },
+    path,
+    line ?? null,
+  );
+  expect(state.visible).toBe(line !== undefined);
+  if (line !== undefined) expect(state.aligned).toBe(true);
+}
+
 async function clickInPlace(selector: string) {
   // Centering a virtualized header can change the active file or evict it.
   await $(selector).waitForEnabled();
@@ -263,10 +302,23 @@ describe("Version-aware navigation", () => {
     };
   });
   beforeEach(async () => {
+    const saved: { queues: Record<string, ReviewQueue> } = JSON.parse(
+      readFileSync(join(process.env.PEER_DATA_DIR!, "state.json"), "utf8"),
+    );
+    await browser.execute(async (queueIds) => {
+      const appWindow = window as Window & {
+        __TAURI__: { core: { invoke: typeof invoke } };
+      };
+      for (const queueId of queueIds)
+        await appWindow.__TAURI__.core.invoke("delete_comments", {
+          queueId,
+          id: null,
+        });
+    }, Object.keys(saved.queues));
+    await reloadApp(scenarioPreferences);
     await browser.execute(async () => {
       await (window as any).__TAURI__.window.getCurrentWindow().setFocus();
     });
-    await reloadApp(scenarioPreferences);
     await switchView("Changes");
     await $('.tree-file[title="call.ts"]').click();
     await expect($('.tree-file[title="call.ts"]')).toHaveAttribute(
@@ -277,6 +329,194 @@ describe("Version-aware navigation", () => {
   });
   after(async () => {
     await reloadApp(originalPreferences);
+  });
+
+  for (const view of ["Code", "Changes"] as const) {
+    it(`keeps line and file comments available after definitions and references in ${view}`, async () => {
+      if (view === "Code") await switchView("Code");
+      const bodies: string[] = [];
+      const saveComment = async (body: string) => {
+        bodies.push(body);
+        await expect($('[aria-label="Comment text"]')).toBeFocused();
+        await browser.keys(body);
+        await browser.execute(() => {
+          const form =
+            document.querySelector<HTMLFormElement>(".comment-composer");
+          if (!form) throw new Error("Comment editor is not open");
+          form.requestSubmit();
+        });
+        await $(".comment-composer").waitForExist({ reverse: true });
+        await expect($(".feedback-panel")).toHaveText(
+          expect.stringContaining(body),
+        );
+        await expect($(".inline-comment")).toHaveText(
+          expect.stringContaining(body),
+        );
+      };
+      for (const side of view === "Code"
+        ? (["new"] as const)
+        : (["old", "new"] as const)) {
+        await symbol("asdf", side);
+        await key("F12");
+        await $(".navigation-version").waitForExist();
+        await sourceContains(side === "old" ? "version A" : "version B");
+        const line = side === "old" ? 3 : 4;
+        await expectCommentHover("defs.ts");
+        await expectCommentHover("defs.ts", 1);
+        await expectCommentHover("defs.ts", line);
+        expect(
+          await browser.execute(() => window.getSelection()?.toString()),
+        ).toBe("asdf");
+        await browser.saveScreenshot(
+          resolve(`test-results/navigation-hover-${view}-${side}.png`),
+        );
+        await expectCommentHover("defs.ts");
+        await clickLineComment(line, "context", "defs.ts");
+        await expect($(".comment-composer .comment-path")).toHaveText(
+          "defs.ts",
+        );
+        await expect($(".comment-composer .comment-location")).toHaveText(
+          side === "old" ? `Old line ${line}` : `line ${line}`,
+        );
+        await saveComment(`${view} ${side} definition feedback`);
+        await symbol("asdf");
+        await key("F12");
+        await $('[aria-label="References"]').waitForExist();
+        await $(".navigation-result").click();
+        await sourceContains(side === "old" ? "asdf(); // A" : "asdf(); // B");
+        const referenceLine = side === "old" ? 2 : 3;
+        await expectCommentHover("call.ts");
+        await expectCommentHover("call.ts", 4);
+        await expectCommentHover("call.ts", referenceLine);
+        await expectCommentHover("call.ts");
+        await clickLineComment(referenceLine, "context", "call.ts");
+        await expect($('[aria-label="References"]')).not.toExist();
+        await expect($(".comment-composer .comment-path")).toHaveText(
+          "call.ts",
+        );
+        await saveComment(`${view} ${side} reference feedback`);
+        await browser.saveScreenshot(
+          resolve(`test-results/navigation-comments-${view}-${side}.png`),
+        );
+        await clickInPlace('[aria-label="Comment on file call.ts"]');
+        await expect($(".comment-composer .comment-location")).toHaveText(
+          "File comment",
+        );
+        await expect($('[aria-label="Comment text"]')).toBeFocused();
+        await browser.keys("Retained draft");
+        await $('[aria-label="Go back"]').click();
+        await sourceContains(side === "old" ? "version A" : "version B");
+        await expectCommentHover("defs.ts", line);
+        await expectCommentHover("defs.ts");
+        await $('[aria-label="Go back"]').click();
+        if (view === "Changes")
+          await $('[aria-label="Comparison mode"]').waitForExist();
+        await clickLineComment(
+          1,
+          view === "Code"
+            ? "context"
+            : side === "old"
+              ? "change-deletion"
+              : "change-addition",
+          "call.ts",
+        );
+        await expect($('[aria-label="Comment text"]')).toHaveValue(
+          "Retained draft",
+        );
+        await $('[aria-label="Discard draft"]').click();
+      }
+      const saved: { queues: Record<string, ReviewQueue> } = JSON.parse(
+        readFileSync(join(process.env.PEER_DATA_DIR!, "state.json"), "utf8"),
+      );
+      const comments = Object.values(saved.queues).flatMap(
+        (queue) => queue.comments,
+      );
+      for (const body of bodies) {
+        const comment = comments.find((comment) => comment.body === body);
+        const definition = body.includes("definition");
+        const old = body.includes("old");
+        expect(comment?.path).toBe(definition ? "defs.ts" : "call.ts");
+        expect(comment?.anchor.line).toBe(
+          definition ? (old ? 3 : 4) : old ? 2 : 3,
+        );
+        expect(comment?.anchor.side).toBe(
+          view === "Code" ? undefined : old ? "old" : "new",
+        );
+        expect(comment?.anchor.lineText).toBe(
+          definition ? `\treturn 'version ${old ? "A" : "B"}';` : "keep();",
+        );
+      }
+    });
+  }
+
+  it("anchors navigation comments to the current path of a renamed file", async () => {
+    git("mv", "defs.ts", "renamed.ts");
+    // Keep identical contents so this small fixture is detected as a rename.
+    writeFileSync(join(root, "renamed.ts"), oldDefinition);
+    try {
+      await $('[aria-label="Refresh repository"]').click();
+      await $('[aria-label="Refresh repository"]').waitForEnabled();
+      await $('.tree-file[title="renamed.ts"]').waitForExist();
+      await expect($('.tree-file[title="defs.ts"]')).not.toExist();
+      await $('.tree-file[title="call.ts"]').click();
+      await symbol("asdf", "old");
+      await key("F12");
+      await sourceContains("version A");
+      await clickLineComment(2, "context", "defs.ts");
+      await expect($(".comment-composer .comment-path")).toHaveText(
+        "renamed.ts",
+      );
+      await expect($(".comment-composer .comment-location")).toHaveText(
+        "Old line 2",
+      );
+      await browser.keys("Review the renamed definition");
+      await browser.execute(() => {
+        document
+          .querySelector<HTMLFormElement>(".comment-composer")
+          ?.requestSubmit();
+      });
+      await $(".comment-composer").waitForExist({ reverse: true });
+      await expect($(".inline-comment")).toHaveText(
+        expect.stringContaining("Review the renamed definition"),
+      );
+      const saved: { queues: Record<string, ReviewQueue> } = JSON.parse(
+        readFileSync(join(process.env.PEER_DATA_DIR!, "state.json"), "utf8"),
+      );
+      const comment = Object.values(saved.queues)
+        .flatMap((queue) => queue.comments)
+        .find((comment) => comment.body === "Review the renamed definition");
+      expect(comment?.path).toBe("renamed.ts");
+      expect(comment?.oldPath).toBe("defs.ts");
+      expect(comment?.anchor.side).toBe("old");
+      expect(comment?.anchor.lineText).toBe("export function asdf() {");
+    } finally {
+      git("mv", "renamed.ts", "defs.ts");
+      writeFileSync(join(root, "defs.ts"), newDefinition);
+    }
+  });
+
+  it("rejects a navigation comment when its frozen source has changed", async () => {
+    await symbol("asdf");
+    await key("F12");
+    await sourceContains("version B");
+    await clickLineComment(3, "context", "defs.ts");
+    await browser.keys("Keep this frozen-source feedback");
+    writeFileSync(join(root, "defs.ts"), "// Inserted line\n" + newDefinition);
+    try {
+      await browser.execute(() => {
+        document
+          .querySelector<HTMLFormElement>(".comment-composer")
+          ?.requestSubmit();
+      });
+      await $(".draft-error [role=alert]").waitForDisplayed();
+      await expect($('[aria-label="Comment text"]')).toHaveValue(
+        "Keep this frozen-source feedback",
+      );
+      await expect($(".comment-card")).not.toExist();
+      await sourceContains("version B");
+    } finally {
+      writeFileSync(join(root, "defs.ts"), newDefinition);
+    }
   });
 
   it("toggles Code and Changes with Ctrl+T without interrupting input", async () => {
