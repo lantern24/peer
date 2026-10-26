@@ -96,7 +96,11 @@ Mouse **Back / Forward** controls use the same history. macOS also supports disc
 
 If a custom mapping does not work, configure it for Peer rather than your browser, or map the buttons to the keyboard shortcuts above. Fluid “Swipe between pages” gestures from trackpads or Magic Mouse remain ordinary scrolling, not history navigation.
 
-History includes file selection, quick-open, search results, line jumps, comment jumps, and symbol jumps. Navigating somewhere new after going Back clears Forward history. History holds up to 100 entries for the current comparison and resets on refresh, comparison changes (including switching Code/Changes), or opening another repository. Source pages retain the original feedback queue and drafts; comments and Reviewed actions remain in the review view. Find and Go to Line operate on the displayed source page.
+History includes file selection, quick-open, search results, line jumps, comment jumps, and symbol jumps. Navigating somewhere new after going Back clears Forward history. History holds up to 100 entries for the current comparison and resets on refresh, comparison changes (including switching Code/Changes), or opening another repository. Source pages retain the original feedback queue and drafts. Find and Go to Line operate on the displayed source page.
+
+When a definition or reference destination belongs to the active review's file list, its gutter **+** and file-comment button remain available. Comments use the displayed version's line numbers and side, and renamed files retain their current comparison path. Clicking a comment control switches the results sidebar back to Feedback without discarding draft text. Saved comments for that version also appear inline. Source-change checks still apply when saving.
+
+Destinations outside the active review—unchanged files absent from Changes, installed dependencies, and standard-library source—remain navigation-only. Return with Back or choose a file from the tree to continue commenting; use Code to review an unchanged repository file. Reviewed controls remain in the Changes review view.
 
 Configure servers in **Settings → Code navigation**. Go, TypeScript/JavaScript, Python, and Rust have presets. Servers and their toolchains must be installed locally; Peer does not install them or fetch dependencies. Suggested setup for the tested presets:
 

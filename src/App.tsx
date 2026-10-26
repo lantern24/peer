@@ -758,6 +758,7 @@ export default function App() {
       const s = snapshotRef.current;
       if (!s) return;
       setFeedback(true);
+      navigation.setResultsVisible(false);
       const request = ++commentRequest.current;
       try {
         const { content } = await loadFile(id, true);
@@ -787,7 +788,7 @@ export default function App() {
           reportError(e);
       }
     },
-    [loadFile, reportError],
+    [loadFile, reportError, navigation.setResultsVisible],
   );
   const submitComment = useCallback(async () => {
     const s = snapshotRef.current;
@@ -1549,6 +1550,8 @@ export default function App() {
                   key={`source:${navigation.file.documentId}:${navigation.mountEpoch}`}
                   snapshot={snapshot}
                   file={navigation.file}
+                  queue={queue}
+                  onComment={beginComment}
                   preferences={preferences}
                   theme={theme}
                   onLoad={navigation.loadSource}

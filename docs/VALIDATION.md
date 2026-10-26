@@ -2,6 +2,14 @@
 
 Reference machine: Apple M2, macOS 26.5.2 (25F84 / Darwin 25.5.0). The native app uses WKWebView with a configured 1440 × 940 window. The test-only configuration keeps its window above other windows to avoid occlusion-related rendering pauses; production windows retain normal behavior. Development tools: Rust 1.88 and Node.js 26.7.
 
+## Comments after symbol navigation — 2026-10-26 JST
+
+Issue #31's definition/reference source pages disabled comment controls even when their destination belonged to the active review. Those pages now expose line and file comments through the existing snapshot-backed composer, switch the results sidebar to Feedback on comment actions, and render saved annotations for the displayed side. Renamed old-side destinations use the current comparison path. Unchanged files absent from Changes and external dependencies remain navigation-only; Code can review unchanged repository files.
+
+`npm test` passed all 42 frontend/harness tests. `npm run build:test-app` passed TypeScript/Vite and the native test build. A focused macOS WKWebView run passed all 24 navigation scenarios and six existing gutter-comment scenarios across Code, unified, and split views. The new regressions cover definitions and references, both diff sides, persisted path/line/source anchors, file-comment draft retargeting, Back, renamed destinations, and stale-source rejection. The Code and old-side Changes screenshots were visually inspected with the gutter **+**, inline feedback, and saved feedback cards visible.
+
+The initial navigation run passed 22 scenarios and failed two: Git classified the tiny rename fixture as deleted/added, and an existing horizontal-scroll setup timed out before invoking symbol navigation. The rename fixture now uses identical contents and asserts its inventory before navigating. The final run passed both, with the horizontal-scroll scenario unchanged. Coverage uses the deterministic protocol fixture and synthesized pointer/key events in the local macOS app, not real-server semantic resolution, physical input, Windows/Linux runtimes, or the full desktop suite. Focused formatting checks passed.
+
 ## Selection compatibility fixture race — 2026-10-23 JST
 
 [PR #30's desktop CI run](https://github.com/lantern24/peer/actions/runs/39876985007/job/120164859089?pr=30) returned to the correct Code file but timed out waiting for the legacy-WebKit fixture's `asdf` selection. A local timing probe held and released the real syntax-highlight worker request: highlighting detached the selected text node before the separate WebDriver navigation command, leaving no source selection for history to capture. This reproduced the same timeout without changing application code.
