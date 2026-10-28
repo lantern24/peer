@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.0](https://github.com/lantern24/peer/compare/v0.3.1...v0.4.0) (2026-10-28)
+
+
+### Features
+
+* **ui:** add copy comments keyboard shortcut ([#37](https://github.com/lantern24/peer/issues/37)) ([54940e5](https://github.com/lantern24/peer/commit/54940e5579eb05a9d753ea0f88c36801871b87de))
+
+
+### Bug Fixes
+
+* **issue-34:** Wrap source lines to the available pane width ([#35](https://github.com/lantern24/peer/issues/35)) ([619e025](https://github.com/lantern24/peer/commit/619e02582ef6f547e850fda6266a7bd8dd5c09f9))
+
 ## [0.3.1](https://github.com/lantern24/peer/compare/v0.3.0...v0.3.1) (2026-10-26)
 
 
