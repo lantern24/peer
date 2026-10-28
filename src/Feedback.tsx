@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   Copy,
   Download,
@@ -10,7 +10,8 @@ import {
   Send,
 } from "lucide-react";
 import type { ReviewComment, ReviewQueue } from "./types";
-import { matchesShortcut } from "./shortcuts";
+import { isTyping } from "./navigation";
+import { matchesShortcut, shortcutLabel } from "./shortcuts";
 
 export type Draft = {
   fileId: string;
@@ -73,6 +74,26 @@ export function Feedback({
   useLayoutEffect(() => {
     composer.current?.focus();
   }, [focusRequest]);
+  const copyDisabled =
+    !queue.comments.length || busy || copying || editing !== null;
+  useEffect(() => {
+    const keys = (event: KeyboardEvent) => {
+      if (
+        copyDisabled ||
+        event.defaultPrevented ||
+        event.isComposing ||
+        event.repeat ||
+        !matchesShortcut("copyComments", event) ||
+        isTyping(event) ||
+        document.querySelector('[role="dialog"]')
+      )
+        return;
+      event.preventDefault();
+      onCopy();
+    };
+    window.addEventListener("keydown", keys);
+    return () => window.removeEventListener("keydown", keys);
+  }, [copyDisabled, onCopy]);
   return (
     <aside id="right-sidebar" className="feedback-panel">
       <div className="feedback-title">
@@ -95,13 +116,11 @@ export function Feedback({
         <button
           className="primary-button"
           onClick={onCopy}
-          disabled={
-            !queue.comments.length || busy || copying || editing !== null
-          }
+          disabled={copyDisabled}
           title={
             editing !== null
               ? "Save or cancel the edit before copying"
-              : undefined
+              : `Copy comments (${shortcutLabel("copyComments")})`
           }
         >
           <Copy size={14} />

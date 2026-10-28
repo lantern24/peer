@@ -82,6 +82,8 @@ The toolbar Refresh button and Refresh Repository menu command reload immediatel
 
 File comments omit `line`. Line numbers are one-based; diff comments on the old side additionally include `"side": "old"`. Outdated comments are included with `"outdated": true`, retaining their original location.
 
+With Feedback open, press **⌘+Shift+C** on macOS or **Ctrl+Shift+C** on Windows/Linux to run **Copy comments**. The shortcut follows the button's enabled state and the **Delete comments after copying** setting. It leaves text fields, editable content, and open dialogs untouched, ignores held-key repeats and text composition, and does not replace ordinary **⌘/Ctrl+C**. The binding is also shown in the button tooltip and keyboard-shortcuts reference.
+
 **Delete comments after copying**, below the Copy comments button, is on by default. After a successful clipboard copy, the copied comments are deleted from the active queue; drafts and Reviewed state are kept. Turn it off to keep comments after copying. The toggle keeps its setting while switching views or hiding Feedback during the session. If clipboard access fails, comments are kept and a selectable JSON fallback is shown. Save JSON uses the same concise format without deleting comments.
 
 Save or cancel an open comment edit before copying. Copy is also unavailable while a comment save is pending. During copying, comment changes are disabled until export, clipboard writing, and deletion finish; hiding and reopening Feedback does not bypass these guards. Clipboard failures release the controls without deleting comments.

@@ -2,6 +2,14 @@
 
 Reference machine: Apple M2, macOS 26.5.2 (25F84 / Darwin 25.5.0). The native app uses WKWebView with a configured 1440 × 940 window. The test-only configuration keeps its window above other windows to avoid occlusion-related rendering pauses; production windows retain normal behavior. Development tools: Rust 1.88 and Node.js 26.7.
 
+## Wrapped-search fixture readiness — 2026-10-28 JST
+
+[PR #37's desktop job](https://github.com/lantern24/peer/actions/runs/40693321690/job/122833449157) timed out before finding the viewport-tall source line in Changes. Its screenshot showed `0 / 1` search results and the diff still at the top. The test sent Enter immediately after entering the query, without waiting for the asynchronously loaded source to supply matches.
+
+A temporary native probe held real `read_file` requests, entered the query, and pressed Enter before releasing the reads. Changes remained at `0 / 1` after loading, reproducing the missing search selection. Waiting for the result, focusing Find, and pressing Enter then passed the original line-height and match-visibility checks in both Code and Changes. The permanent fixture now waits for its match, focuses the input, and verifies `1 / 1` before checking geometry. Both views, viewport assertions, timeouts, and performance thresholds are unchanged; the temporary read gate and logging were removed.
+
+The uninstrumented `PEER_PERFORMANCE_MODE=report npm run test:desktop` run passed all 30 review scenarios, including the reported failure, and 85 of 86 scenarios overall. The separate shared-line navigation scenario timed out at `navigation.spec.ts:763`; its failure capture remained on `call.ts` with no navigation status. That test and application code were unchanged. Code and Changes continuation-search screenshots were visually inspected. This was local macOS WKWebView verification using the existing native executable, not a successful hosted CI run.
+
 ## Desktop reload synchronization — 2026-10-28 JST
 
 [PR #35's desktop job](https://github.com/lantern24/peer/actions/runs/40684606394/job/122803634747) timed out in the shared reload helper before the source-eviction scenario began. The wrapping checks passed; performance warnings were report-only. An instrumented native probe observed a JavaScript readiness check taking 30 seconds across document replacement, despite the new app loading. The CI artifacts did not capture the hook's DOM state, so they do not establish which readiness condition was pending.

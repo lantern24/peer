@@ -156,6 +156,11 @@
       }
     ]
   },
+  "copyComments": {
+    "group": "Comments and text editing",
+    "action": "Copy comments from Feedback",
+    "bindings": [{ "keys": "CmdOrCtrl+Shift+C" }]
+  },
   "clipboard": {
     "group": "Comments and text editing",
     "action": "Cut / copy / paste text",

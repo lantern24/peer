@@ -737,7 +737,14 @@ describe("Peer in the native webview", () => {
         await click('.tree-file[title="notes.txt"]');
         await click('button[aria-label="Find in file"]');
         await $('input[aria-label="Find in file"]').setValue("needle");
+        // A file click can return before its source and search results load.
+        await expect($(".find-bar")).toHaveText(expect.stringContaining("/ 1"));
+        await $('input[aria-label="Find in file"]').click();
+        await expect($('input[aria-label="Find in file"]')).toBeFocused();
         await browser.keys("Enter");
+        await expect($(".find-bar")).toHaveText(
+          expect.stringContaining("1 / 1"),
+        );
         await browser.waitUntil(() =>
           browser.execute(() => {
             const line = document
