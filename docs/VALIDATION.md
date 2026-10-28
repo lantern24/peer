@@ -2,6 +2,16 @@
 
 Reference machine: Apple M2, macOS 26.5.2 (25F84 / Darwin 25.5.0). The native app uses WKWebView with a configured 1440 × 940 window. The test-only configuration keeps its window above other windows to avoid occlusion-related rendering pauses; production windows retain normal behavior. Development tools: Rust 1.88 and Node.js 26.7.
 
+## Desktop reload synchronization — 2026-10-28 JST
+
+[PR #35's desktop job](https://github.com/lantern24/peer/actions/runs/40684606394/job/122803634747) timed out in the shared reload helper before the source-eviction scenario began. The wrapping checks passed; performance warnings were report-only. An instrumented native probe observed a JavaScript readiness check taking 30 seconds across document replacement, despite the new app loading. The CI artifacts did not capture the hook's DOM state, so they do not establish which readiness condition was pending.
+
+The helper now marks the outgoing HTML document and uses a native element query to wait for an unmarked document containing the mounted app. It no longer runs asynchronous JavaScript readiness callbacks across unload. Font, sidebar, and commit-history persistence checks use the same helper. Preference resets still run before the replacement app mounts; assertions, timeouts, and performance thresholds are unchanged.
+
+A throwaway native probe passed 30 consecutive reloads, checking a changed document time origin and alternating rendered 12/14 px source fonts. Each reset and font-readiness check completed in 370–595 ms. The replacement-app screenshot was visually inspected, and the probe and temporary logging were removed.
+
+The final uninstrumented `PEER_PERFORMANCE_MODE=report npm run test:desktop` run passed all 86 scenarios across all eight specs in macOS WKWebView, including source eviction and font/sidebar/commit persistence. `npm test` passed all 42 frontend/harness tests; formatting checks passed for the changed files. The existing native test executable was reused because this follow-up changes only tests and this record. These are local results, not evidence of a new GitHub-hosted run.
+
 ## Viewport-based source wrapping — 2026-10-28 JST
 
 Issue #34 now soft-wraps Code, unified diffs, and each split-diff column to the available pane width. The custom horizontal scrollbar, its shortcuts, and horizontal history state were removed. Find reveals the matching continuation after asynchronous line navigation and renderer layout. Refresh captures the displayed source row relative to the sticky header and restores a semantic line target while wrapped heights settle, rather than retaining initial pixel estimates or measuring an unmounted replacement header.

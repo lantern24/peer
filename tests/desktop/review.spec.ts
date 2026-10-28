@@ -854,7 +854,7 @@ describe("Peer in the native webview", () => {
     expect(readState().queues).toEqual(queuesBefore);
     await switchView("Code");
     await waitForFont(16, 29);
-    await browser.refresh();
+    await reloadApp();
     await $('[data-repository="benchmark-repo"]').waitForExist();
     await waitForFont(16, 29);
     await switchView("Changes");

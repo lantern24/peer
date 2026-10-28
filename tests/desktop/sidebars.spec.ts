@@ -159,11 +159,7 @@ describe("Resizable sidebars in the native webview", () => {
         saved().files === resized.files &&
         saved().feedback === resized.feedback,
     );
-    const loadedAt = await browser.execute(() => performance.timeOrigin);
-    await browser.refresh();
-    await browser.waitUntil(() =>
-      browser.execute((before) => performance.timeOrigin !== before, loadedAt),
-    );
+    await reloadApp();
     await $(left).waitForExist();
     await browser.waitUntil(async () => {
       const after = await geometry();
