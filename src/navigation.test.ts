@@ -11,7 +11,6 @@ const entry = (selected: string): HistoryEntry => ({
   page: null,
   viewport: {
     top: 42,
-    horizontal: { [selected]: [20, 30] },
     collapsed: ["other"],
     expanded: {},
     symbol: { id: selected, side: "old", position: { line: 5, character: 4 } },

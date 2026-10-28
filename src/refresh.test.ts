@@ -23,7 +23,6 @@ const state: ViewportState = {
   },
   fingerprints: { b: "before" },
   manuallyLoaded: ["b"],
-  horizontal: { b: [10, 20] },
   collapsed: ["a"],
   expanded: { b: [{ hunk: 0, direction: "up" }] },
   symbol: { id: "b", side: "old", position: { line: 19, character: 3 } },
@@ -46,7 +45,6 @@ describe("refresh viewport", () => {
       file("c"),
     ])!;
     expect(result.anchor).toEqual({ ...state.anchor, id: "renamed" });
-    expect(result.horizontal).toEqual({ renamed: [10, 20] });
     expect(result.expanded).toEqual({ renamed: state.expanded.b });
     expect(result.fingerprints).toEqual({ renamed: "before" });
     expect(result.manuallyLoaded).toEqual(["renamed"]);

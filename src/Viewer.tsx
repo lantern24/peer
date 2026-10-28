@@ -32,10 +32,6 @@ import { decorateWhitespace, whitespaceCSS } from "./whitespace";
 import { highlightSearchLine, searchCSS, type SourceMatch } from "./search";
 import { rendererThemeId, type Theme } from "./themes";
 import { matchesShortcut, shortcutLabel } from "./shortcuts";
-import {
-  HorizontalScrollbar,
-  type HorizontalScrollbarHandle,
-} from "./HorizontalScrollbar";
 
 import type { LoadedFile } from "./loaded-file";
 import { sourceLines } from "./loaded-file";
@@ -113,7 +109,6 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
       onError,
     } = props;
     const viewer = useRef<CodeViewHandle<ReviewComment, undefined>>(null);
-    const horizontalScrollbar = useRef<HorizontalScrollbarHandle>(null);
     const scroll = useRef(0);
     const surface = useRef<HTMLDivElement>(null);
     const symbol = useRef<SymbolPosition | null>(null);
@@ -157,6 +152,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
       selectLine: boolean;
     } | null>(null);
     const pendingFindScroll = useRef<SourceMatch | null>(null);
+    const findScrollQueued = useRef(false);
     const searchedNodes = useRef(new WeakSet<HTMLElement>());
     const lastDiagnosticRender = useRef<{
       snapshotId: string;
@@ -401,6 +397,68 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
         : symbol.current;
     }, [sourceSelection]);
 
+    const revealSearchMatch = useCallback(() => {
+      if (!pendingFindScroll.current || findScrollQueued.current) return;
+      findScrollQueued.current = true;
+      // onPostRender precedes CodeView's height reconciliation. Measure only
+      // after that render (and any synchronous line jump) has finished.
+      queueMicrotask(() => {
+        try {
+          const current = refs.current;
+          const active = pendingFindScroll.current;
+          const id = current.selected;
+          const handle = viewer.current;
+          const instance = handle?.getInstance();
+          if (
+            !active ||
+            !id ||
+            active !== current.findMatch ||
+            !current.findQuery ||
+            !handle ||
+            !instance
+          )
+            return;
+          instance.render(true);
+          const node = instance
+            .getRenderedItems()
+            .find((item) => item.id === id)?.element;
+          const mark = node?.shadowRoot?.querySelector<HTMLElement>(
+            ".search-match-active",
+          );
+          const line = mark?.closest<HTMLElement>(
+            "[data-line][data-line-type]",
+          );
+          const bounds = mark?.getClientRects()[0];
+          const container = instance.getContainerElement();
+          if (!node || !line || !bounds || !container) return;
+          const viewport = container.getBoundingClientRect();
+          const header =
+            node.querySelector(".file-heading")?.getBoundingClientRect()
+              .height ?? 0;
+          pendingFindScroll.current = null;
+          if (
+            bounds.top < viewport.top + header ||
+            bounds.bottom > viewport.bottom
+          ) {
+            // Keep the source line as the virtual target, but align its matching
+            // visual fragment rather than the start of a viewport-tall line.
+            handle.scrollTo({
+              type: "line",
+              id,
+              lineNumber: active.line,
+              side: active.side === "old" ? "deletions" : "additions",
+              align: "start",
+              offset: line.getBoundingClientRect().top - bounds.top + 16,
+              behavior: "instant",
+            });
+            instance.render(true);
+          }
+        } finally {
+          findScrollQueued.current = false;
+        }
+      });
+    }, []);
+
     const highlightSearch = useCallback(
       (node: HTMLElement, id: string) => {
         const current = refs.current;
@@ -440,25 +498,11 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
               ? match
               : undefined;
           highlightSearchLine(line, query, active);
-          if (active && pendingFindScroll.current === active) {
-            const mark = line.querySelector<HTMLElement>(
-              ".search-match-active",
-            );
-            const column = line.closest<HTMLElement>("[data-code]");
-            if (mark && column) {
-              const bounds = mark.getBoundingClientRect();
-              const viewport = column.getBoundingClientRect();
-              if (bounds.left < viewport.left)
-                column.scrollLeft += bounds.left - viewport.left - 16;
-              else if (bounds.right > viewport.right)
-                column.scrollLeft += bounds.right - viewport.right + 16;
-              pendingFindScroll.current = null;
-              horizontalScrollbar.current?.sync();
-            }
-          }
+          if (active && pendingFindScroll.current === active)
+            revealSearchMatch();
         }
       },
-      [positionAt],
+      [positionAt, revealSearchMatch],
     );
 
     useEffect(() => {
@@ -567,15 +611,28 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
           );
           setSelectedLine(selectLine ? { id, line, side } : null);
           instance?.render(true);
+          const current = refs.current;
+          const match = current.findMatch;
+          // Search navigation may finish loading after the find effect has
+          // already revealed the match. Re-arm after its line jump, including
+          // repeated Enter on the same match, rather than on unrelated renders.
+          if (
+            current.findQuery &&
+            id === current.selected &&
+            match?.line === line &&
+            match.side === (side ?? "new")
+          ) {
+            pendingFindScroll.current = match;
+            revealSearchMatch();
+          }
         }
       },
-      [],
+      [revealSearchMatch],
     );
     const jump = useCallback(
       (id: string, line?: number, side?: "old" | "new", selectLine = true) => {
         targetRange.current = null;
         restoring.current = null;
-        horizontalScrollbar.current?.restore(null);
         setCollapsed((current) => {
           if (!current.has(id)) return current;
           const next = new Set(current);
@@ -648,32 +705,39 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
               !collapsed.has(active.id) &&
               top > fileTop
             ) {
-              const header =
-                active.element
-                  .querySelector(".file-heading")
-                  ?.getBoundingClientRect().height ?? 0;
-              const line = active.instance.getNumericScrollAnchor(
-                top - fileTop + header,
+              const header = active.element.shadowRoot
+                ?.querySelector("[data-diffs-header]")
+                ?.getBoundingClientRect();
+              const viewport = instance
+                .getContainerElement()
+                ?.getBoundingClientRect();
+              const visibleTop = Math.max(
+                viewport?.top ?? 0,
+                header?.bottom ?? 0,
               );
-              if (line) {
-                const side =
-                  "side" in line && line.side === "deletions" ? "old" : "new";
+              // Use the visible row, not estimated heights for unmeasured wraps.
+              for (const line of active.element.shadowRoot?.querySelectorAll<HTMLElement>(
+                "[data-code] [data-line][data-line-type]",
+              ) ?? []) {
+                if (!viewport) break;
+                const bounds = line.getBoundingClientRect();
+                if (
+                  bounds.bottom <= visibleTop ||
+                  bounds.top >= viewport.bottom
+                )
+                  continue;
+                const position = positionAt(line, active.id);
                 anchor.line = {
-                  number: line.lineNumber,
-                  side,
-                  offset: fileTop + line.top - top,
-                  text: sourceLines(file, side)[line.lineNumber - 1] ?? "",
+                  number: position.position.line + 1,
+                  side: position.side,
+                  offset: bounds.top - visibleTop,
+                  text:
+                    sourceLines(file, position.side)[position.position.line] ??
+                    "",
                 };
+                break;
               }
             }
-          }
-          const horizontal: Record<string, number[]> = {};
-          for (const item of rendered) {
-            horizontal[item.id] = Array.from(
-              item.element.shadowRoot?.querySelectorAll<HTMLElement>(
-                "[data-code]",
-              ) ?? [],
-            ).map((node) => node.scrollLeft);
           }
           return {
             top,
@@ -691,7 +755,6 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
                   !refs.current.loaded[entry.id].content.deferred,
               )
               .map((entry) => entry.id),
-            horizontal,
             collapsed: [...collapsed],
             expanded: structuredClone(expansions.current),
             symbol: sourcePosition(),
@@ -720,6 +783,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
         jump,
         collapsed,
         selectedLine,
+        positionAt,
         sourcePosition,
         sourceSelection,
         highlightTarget,
@@ -905,7 +969,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
           ?.getRenderedItems()
           .find((item) => item.id === anchor.id);
         const file = loaded[anchor.id];
-        let offset = !file || file.content.deferred ? 0 : anchor.offset;
+        let restoredLine = false;
         if (
           anchor.line &&
           context &&
@@ -945,18 +1009,33 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
               );
             instance?.render(true);
           }
-          const position = context.instance.getLinePosition(
-            number,
-            saved.side === "old" ? "deletions" : "additions",
-          );
-          if (position) offset = position.top - saved.offset;
+          // Keep a semantic target while the virtualizer measures wrapped rows;
+          // a one-shot pixel offset would retain its initial height estimates.
+          handle.scrollTo({
+            type: "line",
+            id: anchor.id,
+            lineNumber: number,
+            side: saved.side === "old" ? "deletions" : "additions",
+            align: "start",
+            offset: saved.offset,
+            behavior: "instant",
+          });
+          restoredLine = true;
         }
-        const height = context?.instance.getVirtualizedHeight();
-        offset = Math.max(
-          0,
-          Math.min(offset, height === undefined ? offset : height - 1),
-        );
-        restoreScroll((instance?.getTopForItem(anchor.id) ?? 0) + offset);
+        if (!restoredLine) {
+          const height = context?.instance.getVirtualizedHeight();
+          const offset =
+            !file || file.content.deferred
+              ? 0
+              : Math.max(
+                  0,
+                  Math.min(
+                    anchor.offset,
+                    height === undefined ? anchor.offset : height - 1,
+                  ),
+                );
+          restoreScroll((instance?.getTopForItem(anchor.id) ?? 0) + offset);
+        }
       } else restoreScroll(state.top);
       if (state.selectedLine)
         handle.setSelectedLines({
@@ -975,22 +1054,6 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
           },
         });
       highlightTarget();
-      for (const item of handle.getInstance()?.getRenderedItems() ?? []) {
-        Array.from(
-          item.element.shadowRoot?.querySelectorAll<HTMLElement>(
-            "[data-code]",
-          ) ?? [],
-        ).forEach((node, i) => {
-          node.scrollLeft = state.horizontal[item.id]?.[i] ?? 0;
-        });
-      }
-      horizontalScrollbar.current?.sync();
-      const horizontalId = state.anchor?.id ?? refs.current.selected;
-      if (horizontalId)
-        horizontalScrollbar.current?.restore({
-          id: horizontalId,
-          left: Math.max(0, ...(state.horizontal[horizontalId] ?? [])),
-        });
       symbol.current = state.symbol;
       restoring.current = null;
       const complete = refreshRestored.current;
@@ -1014,7 +1077,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
         preferredHighlighter: "shiki-wasm",
         useTokenTransformer: true,
         diffIndicators: "classic",
-        overflow: "scroll",
+        overflow: "wrap",
         enableGutterUtility: !props.navigationOnly,
         enableLineSelection: true,
         // File navigation scrolls the viewer; its visible controls must stay clickable.
@@ -1084,9 +1147,6 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
           `:host { --diffs-font-size: ${preferences.codeFontSize}px; --diffs-line-height: ${Math.round((preferences.codeFontSize * 22) / 12)}px; }` +
           (preferences.showWhitespace ? whitespaceCSS : ""),
         onPostRender(node, _instance, phase, context) {
-          horizontalScrollbar.current?.refresh(
-            phase !== "unmount" && context.item.id === refs.current.selected,
-          );
           if (phase === "unmount") return;
           const props = refs.current;
           const id = context.item.id;
@@ -1364,7 +1424,6 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
               }
             }
             onScroll(top);
-            horizontalScrollbar.current?.refresh();
           }}
           renderCustomHeader={renderHeader}
           renderGutterUtility={(getHoveredLine, item) => (
@@ -1422,16 +1481,6 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
                 : "Read-only source · Your feedback is saved locally"}
             </div>
           )}
-        />
-        <HorizontalScrollbar
-          ref={horizontalScrollbar}
-          path={selected ? entries.get(selected)?.path : undefined}
-          getHost={() =>
-            viewer.current
-              ?.getInstance()
-              ?.getRenderedItems()
-              .find((item) => item.id === refs.current.selected)?.element
-          }
         />
         {contextMenu && (
           <div

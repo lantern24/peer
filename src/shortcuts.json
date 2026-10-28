@@ -309,35 +309,5 @@
     "bindings": [
       { "keys": "Shift+Tab", "optionalModifiers": ["Ctrl", "Cmd", "Alt"] }
     ]
-  },
-  "scrollLeft": {
-    "group": "Focused horizontal scrollbar",
-    "action": "Scroll left",
-    "bindings": [{ "keys": "ArrowLeft", "allowExtraModifiers": true }]
-  },
-  "scrollRight": {
-    "group": "Focused horizontal scrollbar",
-    "action": "Scroll right",
-    "bindings": [{ "keys": "ArrowRight", "allowExtraModifiers": true }]
-  },
-  "scrollPageLeft": {
-    "group": "Focused horizontal scrollbar",
-    "action": "Scroll left by one page",
-    "bindings": [{ "keys": "PageUp", "allowExtraModifiers": true }]
-  },
-  "scrollPageRight": {
-    "group": "Focused horizontal scrollbar",
-    "action": "Scroll right by one page",
-    "bindings": [{ "keys": "PageDown", "allowExtraModifiers": true }]
-  },
-  "scrollStart": {
-    "group": "Focused horizontal scrollbar",
-    "action": "Scroll to start",
-    "bindings": [{ "keys": "Home", "allowExtraModifiers": true }]
-  },
-  "scrollEnd": {
-    "group": "Focused horizontal scrollbar",
-    "action": "Scroll to end",
-    "bindings": [{ "keys": "End", "allowExtraModifiers": true }]
   }
 }
