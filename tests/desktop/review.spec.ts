@@ -542,246 +542,252 @@ describe("Peer in the native webview", () => {
     await click('[aria-label="Toggle diff layout"]');
   });
 
-  it("reaches clipped line endings with a visible scrollbar in a narrow window", async () => {
-    const resize = (width: number, height: number) =>
-      browser.execute(
-        async (w, h) => {
-          const api = (window as any).__TAURI__.window;
-          await api.getCurrentWindow().setSize(new api.LogicalSize(w, h));
-        },
-        width,
-        height,
-      );
-    const readColumns = () =>
-      browser.execute(() => {
-        const path = document
-          .querySelector('.tree-file[aria-current="true"]')!
-          .getAttribute("title");
-        const host = Array.from(document.querySelectorAll("[data-file-path]"))
-          .find((e) => e.getAttribute("data-file-path") === path)!
-          .closest("diffs-container")!;
+  it("wraps long source lines to each pane and reflows on window and sidebar resize", async () => {
+    const path = "src/module-000.ts";
+    const source = originalFiles.get(path)!;
+    const firstLine = `export const item0_0 = {\tvalue: 0, label: "${"longToken".repeat(16)}" };  `;
+    writeFileSync(
+      join(process.env.PEER_TEST_REPO!, path),
+      firstLine + "\n" + source.slice(source.indexOf("\n") + 1),
+    );
+    await click('[aria-label="Refresh repository"]');
+    await $('[aria-label="Refresh repository"]').waitForEnabled();
+    const resize = (width: number) =>
+      browser.execute(async (width) => {
+        const api = (window as unknown as TauriWindow).__TAURI__.window;
+        await api.getCurrentWindow().setSize(new api.LogicalSize(width, 940));
+      }, width);
+    const readLines = () =>
+      browser.execute((path) => {
+        const root = document
+          .querySelector(`[data-file-path="${path}"]`)
+          ?.closest("diffs-container")?.shadowRoot;
         return Array.from(
-          host.shadowRoot!.querySelectorAll<HTMLElement>("[data-code]"),
-        ).map((code) => {
-          const line = code.querySelector("[data-line][data-line-type]")!;
-          const range = document.createRange();
-          range.selectNodeContents(line);
-          return {
-            text: line.textContent,
-            left: code.scrollLeft,
-            end: range.getBoundingClientRect().right,
-            edge: code.getBoundingClientRect().left + code.clientWidth,
-          };
-        });
-      });
-    try {
-      await resize(950, 740);
-      await click('.tree-file[title="src/module-000.ts"]');
-      for (const mode of ["unified", "split", "code"]) {
-        if (mode === "split") await click('[aria-label="Toggle diff layout"]');
-        if (mode === "code") {
-          await switchView("Code");
-          await $(".breadcrumb").waitForExist();
-          await click('.tree-file[title="src/module-000.ts"]');
-        }
-        await browser.waitUntil(async () =>
-          browser.execute((mode) => {
-            const root = document
-              .querySelector('[data-file-path="src/module-000.ts"]')
-              ?.closest("diffs-container")?.shadowRoot;
-            return (
-              !!root?.querySelector(
-                mode === "code"
-                  ? "[data-file]"
-                  : mode === "split"
-                    ? '[data-diff-type="split"]'
-                    : '[data-diff-type="single"]',
-              ) &&
-              !!root
-                ?.querySelector("[data-code]")
-                ?.textContent?.includes("item0_0")
-            );
-          }, mode),
-        );
-        const bar = $(".viewer-horizontal-scrollbar");
-        await bar.waitForDisplayed();
-        const geometry = await browser.execute(() => {
-          const bar = document.querySelector(".viewer-horizontal-scrollbar")!;
-          const rect = bar.getBoundingClientRect();
+          root?.querySelectorAll<HTMLElement>(
+            '[data-code] [data-line="1"][data-line-type]',
+          ) ?? [],
+        ).map((line) => {
+          const code = line.closest<HTMLElement>("[data-code]")!;
+          const column = line.getBoundingClientRect();
           const viewport = document
             .querySelector(".code-view")!
             .getBoundingClientRect();
+          // Preserved spaces can hang past a pre-wrap cell. Check visible glyphs.
+          const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+          const range = document.createRange();
+          const rects: DOMRect[] = [];
+          while (walker.nextNode()) {
+            const text = walker.currentNode as Text;
+            for (const match of text.data.matchAll(/\S+/g)) {
+              range.setStart(text, match.index);
+              range.setEnd(text, match.index + match[0].length);
+              for (const rect of range.getClientRects()) {
+                // WebKit also reports zero-width caret boxes at wrap boundaries.
+                if (rect.width > 0 && rect.height > 0) rects.push(rect);
+              }
+            }
+          }
           return {
-            top: rect.top,
-            bottom: rect.bottom,
-            viewportBottom: viewport.bottom,
-            height: innerHeight,
-            range: bar.scrollWidth - bar.clientWidth,
+            text: line.textContent,
+            width: column.width,
+            height: line.getBoundingClientRect().height,
+            lineHeight: parseFloat(getComputedStyle(line).lineHeight),
+            fits:
+              column.left >= viewport.left - 1 &&
+              column.right <= viewport.right + 1 &&
+              rects.every(
+                (rect) =>
+                  rect.left >= column.left - 1 &&
+                  rect.right <= column.right + 1,
+              ),
+            overflow: code.scrollWidth - code.clientWidth,
+            nextTop: code
+              .querySelector('[data-line="2"][data-line-type]')
+              ?.getBoundingClientRect().top,
           };
         });
-        expect(geometry.range).toBeGreaterThan(20);
-        expect(geometry.top).toBeGreaterThanOrEqual(
-          geometry.viewportBottom - 1,
-        );
-        expect(geometry.bottom).toBeLessThan(geometry.height);
-        await browser.execute(() =>
-          document
-            .querySelector<HTMLElement>(".viewer-horizontal-scrollbar")!
-            .focus(),
-        );
-        // The embedded driver sends raw WebDriver private-use characters for
-        // Home/End. Dispatch standard DOM key events to exercise the real handler.
-        const press = (key: string, columnIndex: number | null = null) =>
-          browser.execute(
-            (key, columnIndex) => {
-              const bar = document.querySelector<HTMLElement>(
-                ".viewer-horizontal-scrollbar",
-              );
-              if (!bar) throw new Error("Missing horizontal scrollbar");
-              if (columnIndex !== null) {
-                const column = document
-                  .querySelector('[data-file-path="src/module-000.ts"]')
-                  ?.closest("diffs-container")
-                  ?.shadowRoot?.querySelectorAll<HTMLElement>("[data-code]")[
-                  columnIndex
-                ];
-                if (!column) throw new Error("Missing split column");
-                // Deliver the code gesture and scrollbar command in one task.
-                // The renderer must not replay its previous scroll leader over
-                // Home/End, even when the columns have different scroll ranges.
-                column.scrollLeft = 20;
-                column.dispatchEvent(new Event("scroll"));
-                bar.scrollLeft = 20;
-                bar.dispatchEvent(new Event("scroll"));
-              }
-              bar.dispatchEvent(
-                new KeyboardEvent("keydown", {
-                  key,
-                  bubbles: true,
-                  cancelable: true,
-                }),
-              );
-              if (columnIndex !== null) bar.dispatchEvent(new Event("scroll"));
-            },
-            key,
-            columnIndex,
-          );
-        await press("Home");
+      }, path);
+    try {
+      for (const mode of ["unified", "split", "code"]) {
+        if (mode === "split") await click('[aria-label="Toggle diff layout"]');
+        if (mode === "code") await switchView("Code");
+        await click(`.tree-file[title="${path}"]`);
+        await resize(950);
         await browser.waitUntil(async () =>
-          (await readColumns()).every((c) => c.left === 0),
+          (await readLines()).some((line) => line.text === firstLine),
         );
-        const before = await readColumns();
-        expect(before.some((c) => c.end > c.edge)).toBe(true);
-        await press("End");
-        try {
-          await browser.waitUntil(async () =>
-            (await readColumns()).every(
-              (c) => c.left > 0 && c.end <= c.edge + 1,
-            ),
-          );
-        } catch (error) {
-          writeFileSync(
-            "test-results/horizontal-failure.json",
-            JSON.stringify(
-              {
-                mode,
-                columns: await readColumns(),
-                bar: await browser.execute(() => {
-                  const bar = document.querySelector(
-                    ".viewer-horizontal-scrollbar",
-                  )!;
-                  return {
-                    left: bar.scrollLeft,
-                    width: bar.clientWidth,
-                    full: bar.scrollWidth,
-                    focused: document.activeElement?.outerHTML,
-                    inner: bar.outerHTML,
-                  };
-                }),
-              },
-              null,
-              2,
-            ),
-          );
-          await browser.saveScreenshot(
-            resolve("test-results/horizontal-failure.png"),
-          );
-          throw error;
-        }
-        const after = await readColumns();
-        expect(after.map((c) => c.text)).toEqual(before.map((c) => c.text));
-        expect(after).toHaveLength(mode === "split" ? 2 : 1);
-        if (mode === "split") {
-          for (const columnIndex of [0, 1]) {
-            await press("Home", columnIndex);
-            await browser.waitUntil(async () =>
-              (await readColumns()).every((c) => c.left === 0),
-            );
-            await press("End", columnIndex);
-            await browser.waitUntil(async () =>
-              (await readColumns()).every(
-                (c) => c.left > 0 && c.end <= c.edge + 1,
-              ),
-            );
-          }
-        }
-        await browser.saveScreenshot(
-          resolve(`test-results/horizontal-${mode}.png`),
+        const narrow = await readLines();
+        expect(narrow.map((line) => line.text)).toEqual(
+          mode === "code" ? [firstLine] : [source.split("\n")[0], firstLine],
         );
-        // Scrolling directly over the code must also update the bottom bar.
-        await browser.execute(() => {
-          const host = document
-            .querySelector('[data-file-path="src/module-000.ts"]')!
-            .closest("diffs-container")!;
-          const columns = Array.from(
-            host.shadowRoot!.querySelectorAll<HTMLElement>("[data-code]"),
+        for (const line of narrow) {
+          expect(line.fits).toBe(true);
+          expect(line.overflow).toBeLessThanOrEqual(1);
+          expect(line.height).toBeGreaterThan(line.lineHeight);
+        }
+        if (mode === "split")
+          expect(
+            Math.abs(narrow[0].nextTop! - narrow[1].nextTop!),
+          ).toBeLessThanOrEqual(1);
+
+        await resize(1440);
+        await browser.waitUntil(async () => {
+          const wider = await readLines();
+          return (
+            wider.length === narrow.length &&
+            wider.at(-1)!.height < narrow.at(-1)!.height
           );
-          columns.sort(
-            (a, b) =>
-              b.scrollWidth - b.clientWidth - (a.scrollWidth - a.clientWidth),
-          )[0].scrollLeft = 20;
         });
-        await browser.waitUntil(
-          async () =>
-            Math.abs(
-              (await browser.execute(
-                () =>
-                  document.querySelector(".viewer-horizontal-scrollbar")!
-                    .scrollLeft,
-              )) - 20,
-            ) < 2,
+        const wide = await readLines();
+        expect(wide.map((line) => line.text)).toEqual(
+          narrow.map((line) => line.text),
         );
+
+        // Change the pane width without changing the window.
+        const divider = '[aria-label="Resize file navigation sidebar"]';
+        await browser.execute((selector) => {
+          const divider = document.querySelector<HTMLElement>(selector)!;
+          divider.focus();
+          divider.dispatchEvent(
+            new KeyboardEvent("keydown", {
+              key: "End",
+              bubbles: true,
+              cancelable: true,
+            }),
+          );
+        }, divider);
+        await browser.waitUntil(
+          async () => (await readLines()).at(-1)!.width < wide.at(-1)!.width,
+        );
+        const sidebar = await readLines();
+        expect(sidebar.at(-1)!.height).toBeGreaterThan(wide.at(-1)!.height);
+        expect(sidebar.every((line) => line.fits && line.overflow <= 1)).toBe(
+          true,
+        );
+        await browser.execute((selector) => {
+          document.querySelector(selector)!.dispatchEvent(
+            new MouseEvent("dblclick", {
+              bubbles: true,
+            }),
+          );
+        }, divider);
+
+        // Selecting wrapped visual rows must still copy the original source.
+        const selected = await browser.execute((path) => {
+          const lines = document
+            .querySelector(`[data-file-path="${path}"]`)!
+            .closest("diffs-container")!
+            .shadowRoot!.querySelectorAll(
+              '[data-code] [data-line="1"][data-line-type]',
+            );
+          const walker = document.createTreeWalker(
+            lines[lines.length - 1],
+            NodeFilter.SHOW_TEXT,
+          );
+          const nodes: Text[] = [];
+          while (walker.nextNode()) nodes.push(walker.currentNode as Text);
+          const selection = window.getSelection()!;
+          selection.removeAllRanges();
+          selection.setBaseAndExtent(
+            nodes[0],
+            0,
+            nodes[nodes.length - 1],
+            nodes[nodes.length - 1].length,
+          );
+          return selection.toString();
+        }, path);
+        expect(selected).toBe(firstLine);
+        await clickLineComment(
+          1,
+          mode === "code" ? "context" : "change-addition",
+        );
+        const comment = `Wrapped line in ${mode}`;
+        await $('[aria-label="Comment text"]').setValue(comment);
+        await click("button=Add comment");
+        await expect($(".comment-card p")).toHaveText(comment);
+        await browser.saveScreenshot(resolve(`test-results/wrap-${mode}.png`));
+        await click("button=Copy comments");
+        await expect($(".comment-card")).not.toExist();
+        const copied = await browser.execute(() =>
+          (window as unknown as TauriWindow).__TAURI__.core.invoke<string>(
+            "plugin:clipboard-manager|read_text",
+          ),
+        );
+        expect(JSON.parse(copied)).toEqual([{ file: path, line: 1, comment }]);
       }
-      await switchView("Changes");
-      await click('[aria-label="Toggle diff layout"]');
-      await click('.tree-file[title="src/module-001.ts"]');
-      await expect($(".viewer-horizontal-scrollbar")).toHaveAttribute(
-        "aria-label",
-        "Scroll code horizontally: src/module-001.ts",
-      );
-      await $(".viewer-horizontal-scrollbar").waitForDisplayed();
-      await clickInPlace('[aria-label="Collapse src/module-001.ts"]');
-      await expect($('[aria-label="Expand src/module-001.ts"]')).toExist();
-      await expect($('.tree-file[title="src/module-001.ts"]')).toHaveAttribute(
-        "aria-current",
-        "true",
-      );
-      await browser.waitUntil(
-        async () => !(await $(".viewer-horizontal-scrollbar").isDisplayed()),
-      );
-      await browser.saveScreenshot(
-        resolve("test-results/horizontal-collapsed.png"),
-      );
-      await clickInPlace('[aria-label="Expand src/module-001.ts"]');
-      await expect($('[aria-label="Collapse src/module-001.ts"]')).toExist();
-      await expect($('.tree-file[title="src/module-001.ts"]')).toHaveAttribute(
-        "aria-current",
-        "true",
-      );
-      await $(".viewer-horizontal-scrollbar").waitForDisplayed();
     } finally {
-      await resize(1440, 940);
-      await click('.tree-file[title="src/module-000.ts"]');
+      await resize(1440);
+    }
+  });
+
+  it("reveals search matches on wrapped continuations taller than the viewport", async () => {
+    writeFileSync(
+      join(process.env.PEER_TEST_REPO!, "notes.txt"),
+      `prefix ${"content ".repeat(500)}needle\nAfter the long line\n`,
+    );
+    await browser.execute(async () => {
+      const api = (window as unknown as TauriWindow).__TAURI__.window;
+      await api.getCurrentWindow().setSize(new api.LogicalSize(950, 940));
+    });
+    try {
+      for (const view of ["Code", "Changes"] as const) {
+        await switchView(view);
+        await click('[aria-label="Refresh repository"]');
+        await $('[aria-label="Refresh repository"]').waitForEnabled();
+        await click('.tree-file[title="notes.txt"]');
+        await click('button[aria-label="Find in file"]');
+        await $('input[aria-label="Find in file"]').setValue("needle");
+        await browser.keys("Enter");
+        await browser.waitUntil(() =>
+          browser.execute(() => {
+            const line = document
+              .querySelector('[data-file-path="notes.txt"]')
+              ?.closest("diffs-container")
+              ?.shadowRoot?.querySelector(
+                '[data-line="1"][data-line-type]:not([data-line-type="change-deletion"])',
+              );
+            return (
+              !!line &&
+              line.getBoundingClientRect().height >
+                document.querySelector(".code-view")!.clientHeight
+            );
+          }),
+        );
+        await browser.waitUntil(() =>
+          browser.execute(() => {
+            const host = document
+              .querySelector('[data-file-path="notes.txt"]')
+              ?.closest("diffs-container");
+            const match = host?.shadowRoot?.querySelector(
+              ".search-match-active",
+            );
+            if (!match) return false;
+            const bounds = match.getBoundingClientRect();
+            const viewport = document
+              .querySelector(".code-view")!
+              .getBoundingClientRect();
+            const header = host
+              ?.querySelector(".file-heading")
+              ?.getBoundingClientRect();
+            return (
+              match.textContent === "needle" &&
+              bounds.top >= (header?.bottom ?? viewport.top) &&
+              bounds.bottom <= viewport.bottom &&
+              bounds.left >= viewport.left &&
+              bounds.right <= viewport.right
+            );
+          }),
+        );
+        await browser.saveScreenshot(
+          resolve(`test-results/wrap-search-${view}.png`),
+        );
+        await click('[aria-label="Close search"]');
+      }
+    } finally {
+      await browser.execute(async () => {
+        const api = (window as unknown as TauriWindow).__TAURI__.window;
+        await api.getCurrentWindow().setSize(new api.LogicalSize(1440, 940));
+      });
     }
   });
 
@@ -848,7 +854,7 @@ describe("Peer in the native webview", () => {
     expect(readState().queues).toEqual(queuesBefore);
     await switchView("Code");
     await waitForFont(16, 29);
-    await browser.refresh();
+    await reloadApp();
     await $('[data-repository="benchmark-repo"]').waitForExist();
     await waitForFont(16, 29);
     await switchView("Changes");
@@ -1866,12 +1872,6 @@ describe("Peer in the native webview", () => {
         return {
           text: line?.textContent,
           offset: line ? line.getBoundingClientRect().top - bounds.top : null,
-          horizontal: Math.max(
-            0,
-            ...Array.from(
-              host?.shadowRoot?.querySelectorAll("[data-code]") ?? [],
-            ).map((node) => node.scrollLeft),
-          ),
         };
       }, target);
     try {
@@ -1909,18 +1909,9 @@ describe("Peer in the native webview", () => {
           ),
         );
         await browser.keys("Escape");
-        await $(".viewer-horizontal-scrollbar").waitForDisplayed();
         await browser.execute(() => {
           document.querySelector<HTMLElement>(".code-view")!.scrollTop += 137;
-          // Use the visible control: virtualized source columns can be replaced
-          // while the go-to-line and vertical scroll layouts are settling.
-          document.querySelector<HTMLElement>(
-            ".viewer-horizontal-scrollbar",
-          )!.scrollLeft = 240;
         });
-        await browser.waitUntil(
-          async () => (await viewport()).horizontal >= 200,
-        );
         let before = await viewport();
         expect(before.text).toContain("anchor line");
         writeFileSync(
@@ -1934,14 +1925,6 @@ describe("Peer in the native webview", () => {
         await clickInPlace(`[data-file-path="${target}"] .review-check input`);
         await expect($(".error-banner")).toHaveText(
           expect.stringContaining("Source changed since this snapshot"),
-        );
-        await browser.execute(() => {
-          document.querySelector<HTMLElement>(
-            ".viewer-horizontal-scrollbar",
-          )!.scrollLeft = 240;
-        });
-        await browser.waitUntil(
-          async () => (await viewport()).horizontal >= 200,
         );
         // The error banner changes viewport height; capture the location the
         // user actually sees immediately before pressing Refresh.
@@ -1961,7 +1944,6 @@ describe("Peer in the native webview", () => {
             const after = await viewport();
             return (
               after.text === before.text &&
-              after.horizontal === before.horizontal &&
               Math.abs(after.offset! - before.offset!) <= 2
             );
           });
@@ -1981,7 +1963,6 @@ describe("Peer in the native webview", () => {
           JSON.stringify({ before, after }, null, 2),
         );
         expect(Math.abs(after.offset! - before.offset!)).toBeLessThanOrEqual(2);
-        expect(after.horizontal).toBe(before.horizontal);
         await expect($(`.tree-file[title="${target}"]`)).toHaveAttribute(
           "aria-current",
           "true",

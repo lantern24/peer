@@ -752,38 +752,6 @@ p {
   flex-wrap: wrap;
   gap: 8px;
 }
-.viewer-horizontal-scrollbar {
-  /* Reserve a stable height: showing the bar must not change virtualized rows. */
-  flex: 0 0 14px;
-  min-width: 0;
-  overflow-x: scroll;
-  overflow-y: hidden;
-  visibility: hidden;
-  background: var(--surface);
-}
-.viewer-horizontal-scrollbar > div {
-  height: 1px;
-}
-.viewer-horizontal-scrollbar::-webkit-scrollbar {
-  height: 14px;
-}
-.viewer-horizontal-scrollbar::-webkit-scrollbar-track {
-  background: var(--surface);
-}
-.viewer-horizontal-scrollbar::-webkit-scrollbar-thumb {
-  background: var(--muted);
-  border: 3px solid var(--surface);
-  border-radius: 7px;
-}
-.viewer-horizontal-scrollbar:focus-visible {
-  outline: 2px solid var(--focus);
-  outline-offset: -2px;
-}
-@supports (-moz-appearance: none) {
-  .viewer-horizontal-scrollbar {
-    scrollbar-color: var(--muted) var(--surface);
-  }
-}
 .file-heading {
   display: flex;
   align-items: center;

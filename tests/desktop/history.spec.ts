@@ -174,7 +174,7 @@ describe("Branch commit history", () => {
         );
       }, selected),
     );
-    await browser.execute(() => location.reload());
+    await reloadApp();
     await browser.waitUntil(
       async () =>
         (await $(".commit-summary > code").getAttribute("title")) ===

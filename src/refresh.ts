@@ -39,7 +39,6 @@ export function refreshedViewport(
   return {
     ...state,
     anchor: id ? { ...state.anchor!, id } : { id: target, offset: 0 },
-    horizontal: remap(state.horizontal),
     collapsed: state.collapsed.flatMap((id) =>
       ids.has(id) ? [ids.get(id)!] : [],
     ),

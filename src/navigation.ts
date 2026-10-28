@@ -15,13 +15,13 @@ export type ViewportState = {
     line?: {
       number: number;
       side: "old" | "new";
+      // Visual offset below the sticky file header, including wrapped continuations.
       offset: number;
       text: string;
     };
   };
   fingerprints?: Record<string, string>;
   manuallyLoaded?: string[];
-  horizontal: Record<string, number[]>;
   collapsed: string[];
   expanded: Record<
     string,

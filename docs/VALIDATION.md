@@ -2,6 +2,33 @@
 
 Reference machine: Apple M2, macOS 26.5.2 (25F84 / Darwin 25.5.0). The native app uses WKWebView with a configured 1440 × 940 window. The test-only configuration keeps its window above other windows to avoid occlusion-related rendering pauses; production windows retain normal behavior. Development tools: Rust 1.88 and Node.js 26.7.
 
+## Desktop reload synchronization — 2026-10-28 JST
+
+[PR #35's desktop job](https://github.com/lantern24/peer/actions/runs/40684606394/job/122803634747) timed out in the shared reload helper before the source-eviction scenario began. The wrapping checks passed; performance warnings were report-only. An instrumented native probe observed a JavaScript readiness check taking 30 seconds across document replacement, despite the new app loading. The CI artifacts did not capture the hook's DOM state, so they do not establish which readiness condition was pending.
+
+The helper now marks the outgoing HTML document and uses a native element query to wait for an unmarked document containing the mounted app. It no longer runs asynchronous JavaScript readiness callbacks across unload. Font, sidebar, and commit-history persistence checks use the same helper. Preference resets still run before the replacement app mounts; assertions, timeouts, and performance thresholds are unchanged.
+
+A throwaway native probe passed 30 consecutive reloads, checking a changed document time origin and alternating rendered 12/14 px source fonts. Each reset and font-readiness check completed in 370–595 ms. The replacement-app screenshot was visually inspected, and the probe and temporary logging were removed.
+
+The final uninstrumented `PEER_PERFORMANCE_MODE=report npm run test:desktop` run passed all 86 scenarios across all eight specs in macOS WKWebView, including source eviction and font/sidebar/commit persistence. `npm test` passed all 42 frontend/harness tests; formatting checks passed for the changed files. The existing native test executable was reused because this follow-up changes only tests and this record. These are local results, not evidence of a new GitHub-hosted run.
+
+## Viewport-based source wrapping — 2026-10-28 JST
+
+Issue #34 now soft-wraps Code, unified diffs, and each split-diff column to the available pane width. The custom horizontal scrollbar, its shortcuts, and horizontal history state were removed. Find reveals the matching continuation after asynchronous line navigation and renderer layout. Refresh captures the displayed source row relative to the sticky header and restores a semantic line target while wrapped heights settle, rather than retaining initial pixel estimates or measuring an unmounted replacement header.
+
+`npm test` passed all 42 frontend/harness tests. `npm run build:test-app` passed TypeScript/Vite and the native test build. The final macOS WKWebView run passed all 61 scenarios across `review.spec.ts`, `navigation.spec.ts`, `sidebars.spec.ts`, and `shortcuts.spec.ts`, using `PEER_PERFORMANCE_MODE=report`.
+
+The wrapping regression failed against the previous executable because source extended beyond the pane. It now covers 950/1440 px windows, sidebar resizing, long unbroken tokens, split-row alignment, exact selected source text, and exported one-based comment anchors in all three layouts. Additional checks cover matches on viewport-tall lines, wrapped Unicode symbol positions, Back, and refreshed anchors after edits above the viewport. Code, split, unified, and continuation-search screenshots were visually inspected. Temporary layout probes were removed.
+
+The embedded driver's mouse Actions do not enter shadow roots; the continuation navigation case resolves the real shadow-root hit target and synthesizes the same pointer/mouse sequence used by the comment helper. Navigation uses the deterministic protocol fixture, not a real language server. Coverage is local macOS WKWebView, not physical input, Windows/Linux runtimes, or the full desktop suite.
+
+Final 100-file/10,000-changed-line workload on the reference Apple M2:
+
+| Measurement              | Observed p95 |  Target |
+| ------------------------ | -----------: | ------: |
+| Warm file navigation     |        96 ms | <100 ms |
+| Scrolling frame interval |        26 ms |  <33 ms |
+
 ## Navigation comment hover tracking — 2026-10-26 JST
 
 Follow-up testing of issue #31 found that navigation's programmatic line selection pinned the gutter **+** to the destination. The renderer prioritizes its selected line over pointer hover. Symbol jumps now retain the symbol's text selection without creating a renderer line selection, including when a jump is deferred or restored through history. Explicit Go to Line and ordinary line selection keep their existing behavior.

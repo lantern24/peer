@@ -9,15 +9,20 @@ import { clickLineComment, reloadApp } from "./app-fixture";
 
 let originalPreferences: any;
 let scenarioPreferences: Preferences;
+type NavigationRequestWindow = Window & {
+  __TAURI_INTERNALS__: {
+    convertFileSrc(path: string, protocol: string): string;
+  };
+  __navigationRequest?: unknown;
+};
 const root = mkdtempSync(join(tmpdir(), "peer-navigation-ui-"));
 const oldDefinition =
   "// Old definition\nexport function asdf() {\n\treturn 'version A';\n}\n";
 const newDefinition =
   "// New definition\n\nexport function asdf() {\n\treturn 'version B';\n}\n";
+const wrappedCall = `\tconst emoji = '😀'; /* ${"wide ".repeat(100)}*/ asdf();`;
 const tail = Array.from({ length: 160 }, (_, i) =>
-  i === 76
-    ? `\tconst emoji = '😀'; asdf(); // ${"wide ".repeat(100)}\n`
-    : `// Context line ${i}\n`,
+  i === 76 ? `${wrappedCall}\n` : `// Context line ${i}\n`,
 ).join("");
 const git = (...args: string[]) =>
   execFileSync("git", args, { cwd: root, stdio: "pipe" });
@@ -819,7 +824,7 @@ describe("Version-aware navigation", () => {
     await $('[aria-label="Toggle diff layout"]').click();
   });
 
-  it("restores expanded context, Unicode selection and both scroll axes after a symbol jump", async () => {
+  it("restores expanded wrapped context, Unicode selection and vertical scroll after a symbol jump", async () => {
     await $('[aria-label="Toggle whitespace markers"]').click();
     await $('button[aria-label="Find in file"]').click();
     await $('input[aria-label="Go to line"]').setValue("80");
@@ -830,11 +835,16 @@ describe("Version-aware navigation", () => {
         const host = document
           .querySelector('[data-file-path="call.ts"]')!
           .closest("diffs-container")!;
-        const code =
-          host.shadowRoot!.querySelector<HTMLElement>("[data-code]")!;
+        const line = host.shadowRoot!.querySelector<HTMLElement>(
+          '[data-line="80"][data-line-type]',
+        );
         return {
           top: document.querySelector(".code-view")!.scrollTop,
-          left: code.scrollLeft,
+          source: line?.textContent?.trimEnd(),
+          wrapped:
+            !!line &&
+            line.getBoundingClientRect().height >
+              parseFloat(getComputedStyle(line).lineHeight) * 2,
           selection: window.getSelection()?.toString(),
         };
       });
@@ -849,19 +859,6 @@ describe("Version-aware navigation", () => {
         );
       }),
     );
-    await $(".viewer-horizontal-scrollbar").waitForDisplayed();
-    await browser.waitUntil(() =>
-      browser.execute(() => {
-        const bar = document.querySelector(".viewer-horizontal-scrollbar")!;
-        return bar.scrollWidth - bar.clientWidth >= 60;
-      }),
-    );
-    await browser.execute(() => {
-      document.querySelector<HTMLElement>(
-        ".viewer-horizontal-scrollbar",
-      )!.scrollLeft = 60;
-    });
-    await browser.waitUntil(async () => (await readViewport()).left === 60);
     await browser.execute(() => {
       const host = document
         .querySelector('[data-file-path="call.ts"]')!
@@ -886,7 +883,8 @@ describe("Version-aware navigation", () => {
     });
     const before = await readViewport();
     expect(before.top).toBeGreaterThan(300);
-    expect(before.left).toBeGreaterThan(0);
+    expect(before.source).toBe(wrappedCall);
+    expect(before.wrapped).toBe(true);
     expect(before.selection).toBe("asdf");
     await key("F12");
     await sourceContains("version B");
@@ -897,7 +895,8 @@ describe("Version-aware navigation", () => {
         const after = await readViewport();
         return (
           Math.abs(after.top - before.top) < 3 &&
-          after.left === before.left &&
+          after.source === wrappedCall &&
+          after.wrapped &&
           after.selection === "asdf"
         );
       });
@@ -912,7 +911,128 @@ describe("Version-aware navigation", () => {
     await $('[aria-label="Toggle whitespace markers"]').click();
   });
 
-  it("preserves expanded unchanged context and both scroll axes when refreshing", async () => {
+  it("navigates from a wrapped continuation using the original Unicode source position", async () => {
+    await $('button[aria-label="Find in file"]').click();
+    await $('input[aria-label="Go to line"]').setValue("80");
+    await browser.keys("Enter");
+    await $('[aria-label="Close search"]').click();
+    await sourceContains(wrappedCall);
+    const point = await browser.execute(() => {
+      const host = document
+        .querySelector('[data-file-path="call.ts"]')
+        ?.closest("diffs-container");
+      const line = host?.shadowRoot?.querySelector<HTMLElement>(
+        '[data-line="80"][data-line-type]',
+      );
+      const token = Array.from(
+        line?.querySelectorAll<HTMLElement>("[data-char]") ?? [],
+      ).find((token) => token.textContent === "asdf");
+      if (!line || !token?.firstChild)
+        throw new Error("Wrapped source symbol is not rendered");
+      line.scrollIntoView({ block: "center" });
+      const range = document.createRange();
+      range.setStart(token.firstChild, 0);
+      range.setEnd(token.firstChild, 1);
+      const box = range.getBoundingClientRect();
+      const viewer = document
+        .querySelector(".code-view")
+        ?.getBoundingClientRect();
+      if (!viewer || box.top < viewer.top || box.bottom > viewer.bottom)
+        throw new Error("Wrapped source symbol is outside the code pane");
+      window.getSelection()?.removeAllRanges();
+      return {
+        x: Math.round(box.left + 1),
+        y: Math.round(box.top + box.height / 2),
+        continuation:
+          box.top - line.getBoundingClientRect().top >
+          parseFloat(getComputedStyle(line).lineHeight),
+      };
+    });
+    expect(point.continuation).toBe(true);
+    await browser.execute(() => {
+      const appWindow = window as NavigationRequestWindow;
+      const original = window.fetch;
+      const navigationUrl = appWindow.__TAURI_INTERNALS__.convertFileSrc(
+        "navigate_symbol",
+        "ipc",
+      );
+      // Observe the outgoing request without replacing native navigation.
+      window.fetch = async (input, init) => {
+        const url = input instanceof Request ? input.url : String(input);
+        if (url === navigationUrl) {
+          const body: unknown = await new Request(input, init).json();
+          appWindow.__navigationRequest =
+            body && typeof body === "object" && "request" in body
+              ? body.request
+              : null;
+          window.fetch = original;
+        }
+        return original(input, init);
+      };
+    });
+    await browser.execute((point) => {
+      // The embedded driver's Actions stop at the shadow host. Resolve the real
+      // hit target, as clickLineComment does, before sending the pointer sequence.
+      let target = document.elementFromPoint(point.x, point.y);
+      while (target?.shadowRoot) {
+        const inner = target.shadowRoot.elementFromPoint(point.x, point.y);
+        if (!inner || inner === target) break;
+        target = inner;
+      }
+      const token = target?.closest<HTMLElement>("[data-char]");
+      const line = token?.closest<HTMLElement>("[data-line][data-line-type]");
+      if (
+        !target ||
+        token?.textContent !== "asdf" ||
+        line?.dataset.line !== "80"
+      )
+        throw new Error("Wrapped source symbol is not hit-testable");
+      const pointer = {
+        bubbles: true,
+        composed: true,
+        cancelable: true,
+        pointerType: "mouse",
+        pointerId: 1,
+        button: 0,
+        clientX: point.x,
+        clientY: point.y,
+      };
+      target.dispatchEvent(new PointerEvent("pointermove", pointer));
+      target.dispatchEvent(new MouseEvent("mousemove", pointer));
+      const pressed = target.dispatchEvent(
+        new PointerEvent("pointerdown", { ...pointer, buttons: 1 }),
+      );
+      if (pressed)
+        target.dispatchEvent(
+          new MouseEvent("mousedown", { ...pointer, buttons: 1 }),
+        );
+      target.dispatchEvent(new PointerEvent("pointerup", pointer));
+      target.dispatchEvent(new MouseEvent("mouseup", pointer));
+      target.dispatchEvent(new MouseEvent("click", pointer));
+    }, point);
+    await key("F12");
+    await browser.waitUntil(async () =>
+      browser.execute(
+        () =>
+          (window as NavigationRequestWindow).__navigationRequest !== undefined,
+      ),
+    );
+    expect(
+      await browser.execute(
+        () => (window as NavigationRequestWindow).__navigationRequest,
+      ),
+    ).toMatchObject({
+      side: "new",
+      path: "call.ts",
+      position: { line: 79, character: wrappedCall.indexOf("asdf") },
+    });
+    await sourceContains("version B");
+    await expect($(".navigation-version")).toHaveText("B · Working files");
+    await key("-", true);
+    await sourceContains(wrappedCall);
+  });
+
+  it("preserves expanded wrapped context and vertical scroll when refreshing", async () => {
     await $('.tree-file[title="call.ts"]').click();
     await $('button[aria-label="Find in file"]').click();
     await $('input[aria-label="Go to line"]').setValue("80");
@@ -923,41 +1043,34 @@ describe("Version-aware navigation", () => {
         const host = document
           .querySelector('[data-file-path="call.ts"]')
           ?.closest("diffs-container");
+        const line = host?.shadowRoot?.querySelector<HTMLElement>(
+          '[data-line="80"][data-line-type]',
+        );
         return {
           top: document.querySelector(".code-view")!.scrollTop,
-          left: host?.shadowRoot?.querySelector("[data-code]")?.scrollLeft,
-          expanded: !!host?.shadowRoot?.querySelector(
-            '[data-line="80"][data-line-type]',
-          ),
+          source: line?.textContent?.trimEnd(),
+          wrapped:
+            !!line &&
+            line.getBoundingClientRect().height >
+              parseFloat(getComputedStyle(line).lineHeight) * 2,
         };
       });
     await browser.waitUntil(async () => {
       const current = await viewport();
-      return current.expanded && current.top > 300;
+      return current.wrapped && current.top > 300;
     });
-    await $(".viewer-horizontal-scrollbar").waitForDisplayed();
-    await browser.waitUntil(() =>
-      browser.execute(() => {
-        const bar = document.querySelector(".viewer-horizontal-scrollbar")!;
-        return bar.scrollWidth - bar.clientWidth >= 60;
-      }),
-    );
-    await browser.execute(() => {
-      document.querySelector<HTMLElement>(
-        ".viewer-horizontal-scrollbar",
-      )!.scrollLeft = 60;
-    });
-    await browser.waitUntil(async () => (await viewport()).left === 60);
     const before = await viewport();
     expect(before.top).toBeGreaterThan(300);
+    expect(before.source).toBe(wrappedCall);
+    expect(before.wrapped).toBe(true);
     await $('[aria-label="Refresh repository"]').click();
     await $('[aria-label="Refresh repository"]').waitForEnabled();
     await expect($('[aria-label="Go back"]')).not.toBeEnabled();
     await browser.waitUntil(async () => {
       const after = await viewport();
       return (
-        after.expanded &&
-        after.left === before.left &&
+        after.source === wrappedCall &&
+        after.wrapped &&
         Math.abs(after.top - before.top) < 3
       );
     });
@@ -1659,14 +1772,15 @@ describe("Version-aware navigation", () => {
           .join("") === "asdf();",
     );
     await $('[aria-label="Toggle whitespace markers"]').click();
-    await input.setValue("\tconst emoji = '😀'; asdf()");
+    const unicodeQuery = "\tconst emoji = '😀'; /* wide";
+    await input.setValue(unicodeQuery);
     await browser.keys("Enter");
     await browser.waitUntil(
       async () =>
         (await marks())
           .filter((mark) => mark.active)
           .map((mark) => mark.text)
-          .join("") === "\tconst emoji = '😀'; asdf()",
+          .join("") === unicodeQuery,
     );
     await input.setValue("wide");
     await browser.keys("Enter");
