@@ -654,11 +654,11 @@ export default function App() {
   );
   const selectFile = navigation.review;
   const focusFind = useCallback(() => {
-    document
-      .querySelector<HTMLInputElement>(
-        `input[aria-label="${findFocus.current}"]`,
-      )
-      ?.focus();
+    const input = document.querySelector<HTMLInputElement>(
+      `input[aria-label="${findFocus.current}"]`,
+    );
+    input?.focus();
+    if (findFocus.current === "Find in file") input?.select();
   }, []);
   const openFind = useCallback(
     (field: "Find in file" | "Go to line") => {

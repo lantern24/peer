@@ -41,7 +41,7 @@ Filter filenames in the sidebar, use ⌘/Ctrl P for quick-open, ⌘/Ctrl F for i
 
 Long source lines wrap to the available code-pane width in Code, unified diffs, and split diffs. Resizing the window or sidebars reflows the text; split diffs wrap within each column while keeping corresponding rows aligned. Wrapping is visual only: source text, copied selections, line numbers, and comment anchors retain their original meaning.
 
-Search highlights the matching text in filenames and source. In-file Find highlights every visible occurrence in the selected file; Enter/Shift+Enter or the arrow buttons move between matches, with a stronger highlight on the current occurrence. Matching is literal and case-insensitive, including repeated matches on the same line. Press Esc or click Close search to hide Find and remove the source highlights.
+Search highlights the matching text in filenames and source. Opening in-file Find with the toolbar button or invoking ⌘/Ctrl F focuses the input and selects the entire existing query, including when Find is already open. In-file Find highlights every visible occurrence in the selected file; Enter/Shift+Enter or the arrow buttons move between matches, with a stronger highlight on the current occurrence. Matching is literal and case-insensitive, including repeated matches on the same line. Press Esc or click Close search to hide Find and remove the source highlights.
 
 As you scroll Changes, the navigator highlights the file at the top of the diff viewport and keeps its row visible, expanding parent folders as needed. Keyboard focus and your filename filter are preserved.
 

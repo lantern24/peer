@@ -720,6 +720,43 @@ describe("Peer in the native webview", () => {
     }
   });
 
+  it("selects the existing query whenever Find is invoked", async () => {
+    const input = 'input[aria-label="Find in file"]';
+    await click('button[aria-label="Find in file"]');
+    for (const invocation of [
+      "open shortcut",
+      "closed shortcut",
+      "closed toolbar",
+    ]) {
+      await $(input).setValue("item0_0");
+      if (invocation !== "open shortcut")
+        await click('[aria-label="Close search"]');
+      if (invocation === "closed toolbar")
+        await click('button[aria-label="Find in file"]');
+      else
+        await browser.keys([
+          process.platform === "darwin" ? "Meta" : "Control",
+          "f",
+        ]);
+      await expect($(input)).toBeFocused();
+      expect(
+        await browser.execute(() => {
+          const field = document.querySelector<HTMLInputElement>(
+            'input[aria-label="Find in file"]',
+          );
+          return [field?.selectionStart, field?.selectionEnd];
+        }),
+      ).toEqual([0, "item0_0".length]);
+      // The embedded driver's printable keys append regardless of selection.
+      // Use WebKit's editing command to exercise replacement of the selection.
+      await browser.execute(() =>
+        document.execCommand("insertText", false, "item0_1"),
+      );
+      await expect($(input)).toHaveValue("item0_1");
+    }
+    await browser.saveScreenshot(resolve("test-results/find-invocation.png"));
+  });
+
   it("reveals search matches on wrapped continuations taller than the viewport", async () => {
     writeFileSync(
       join(process.env.PEER_TEST_REPO!, "notes.txt"),
