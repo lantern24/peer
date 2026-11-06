@@ -19,7 +19,7 @@ The help shortcut leaves text fields, editable content, and open modal dialogs u
 
 ### Open and manage repositories
 
-Open a repository with the **+** button beside the repository name or ⌘/Ctrl O. Click the repository name to switch among the 12 most recently opened repositories; the dropdown shows their paths and marks the current one. Use arrow keys and Enter to choose, or Escape to close. The first opening shows Changes if any exist, otherwise Code. The app restores each repository's comparison, selected file, and scroll position, and keeps comment drafts while switching. Refresh with the toolbar or ⌘/Ctrl R after your agent edits files.
+Open a repository with the **+** button beside the repository name or ⌘/Ctrl O. Click the repository name to switch among the 12 most recently opened repositories; the dropdown shows their paths and marks the current one. Use arrow keys and Enter to choose, or Escape to close. The first opening shows Changes if any exist, otherwise Code. The app restores each repository's comparison, selected file, and scroll position, and keeps comment drafts while switching. Refresh with the toolbar button beside the branch dropdown or ⌘/Ctrl R after your agent edits files.
 
 For a renamed or moved repository, use its **Update location** folder icon in the dropdown, enter or browse to the new repository root, then choose **Update location**. Peer validates and opens the new location, replaces the old name/path, and preserves the saved view, comments, and Reviewed state. Invalid locations or locations already saved for another repository leave the original entry unchanged. This is an explicit repair; Peer does not automatically locate moved repositories.
 
