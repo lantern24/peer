@@ -19,7 +19,7 @@ The help shortcut leaves text fields, editable content, and open modal dialogs u
 
 ### Open and manage repositories
 
-Open a repository with the **+** button beside the repository name or ⌘/Ctrl O. Click the repository name to switch among the 12 most recently opened repositories; the dropdown shows their paths and marks the current one. Use arrow keys and Enter to choose, or Escape to close. The first opening shows Changes if any exist, otherwise Code. The app restores each repository's comparison, selected file, and scroll position, and keeps comment drafts while switching. Refresh with the toolbar or ⌘/Ctrl R after your agent edits files.
+Open a repository with the **+** button beside the repository name or ⌘/Ctrl O. Click the repository name to switch among the 12 most recently opened repositories; the dropdown shows their paths and marks the current one. Use arrow keys and Enter to choose, or Escape to close. The first opening shows Changes if any exist, otherwise Code. The app restores each repository's comparison, selected file, and scroll position, and keeps comment drafts while switching. Refresh with the toolbar button beside the branch dropdown or ⌘/Ctrl R after your agent edits files.
 
 For a renamed or moved repository, use its **Update location** folder icon in the dropdown, enter or browse to the new repository root, then choose **Update location**. Peer validates and opens the new location, replaces the old name/path, and preserves the saved view, comments, and Reviewed state. Invalid locations or locations already saved for another repository leave the original entry unchanged. This is an explicit repair; Peer does not automatically locate moved repositories.
 
@@ -41,7 +41,7 @@ Filter filenames in the sidebar, use ⌘/Ctrl P for quick-open, ⌘/Ctrl F for i
 
 Long source lines wrap to the available code-pane width in Code, unified diffs, and split diffs. Resizing the window or sidebars reflows the text; split diffs wrap within each column while keeping corresponding rows aligned. Wrapping is visual only: source text, copied selections, line numbers, and comment anchors retain their original meaning.
 
-Search highlights the matching text in filenames and source. In-file Find highlights every visible occurrence in the selected file; Enter/Shift+Enter or the arrow buttons move between matches, with a stronger highlight on the current occurrence. Matching is literal and case-insensitive, including repeated matches on the same line. Press Esc or click Close search to hide Find and remove the source highlights.
+Search highlights the matching text in filenames and source. Opening in-file Find with the toolbar button or invoking ⌘/Ctrl F focuses the input and selects the entire existing query, including when Find is already open. In-file Find highlights every visible occurrence in the selected file; Enter/Shift+Enter or the arrow buttons move between matches, with a stronger highlight on the current occurrence. Matching is literal and case-insensitive, including repeated matches on the same line. Press Esc or click Close search to hide Find and remove the source highlights.
 
 As you scroll Changes, the navigator highlights the file at the top of the diff viewport and keeps its row visible, expanding parent folders as needed. Keyboard focus and your filename filter are preserved.
 

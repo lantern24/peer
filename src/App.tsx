@@ -654,11 +654,11 @@ export default function App() {
   );
   const selectFile = navigation.review;
   const focusFind = useCallback(() => {
-    document
-      .querySelector<HTMLInputElement>(
-        `input[aria-label="${findFocus.current}"]`,
-      )
-      ?.focus();
+    const input = document.querySelector<HTMLInputElement>(
+      `input[aria-label="${findFocus.current}"]`,
+    );
+    input?.focus();
+    if (findFocus.current === "Find in file") input?.select();
   }, []);
   const openFind = useCallback(
     (field: "Find in file" | "Go to line") => {
@@ -1124,6 +1124,15 @@ export default function App() {
                   })
                 }
               />
+              <button
+                className="icon-button"
+                title={`Refresh repository (${shortcutLabel("refreshRepository")})`}
+                aria-label="Refresh repository"
+                disabled={busy}
+                onClick={refresh}
+              >
+                <RefreshCw size={16} className={busy ? "spin" : ""} />
+              </button>
               <div className="toolbar-spacer" />
               <button
                 className="icon-button"
@@ -1134,15 +1143,6 @@ export default function App() {
                 }
               >
                 <Search size={16} />
-              </button>
-              <button
-                className="icon-button"
-                title={`Refresh repository (${shortcutLabel("refreshRepository")})`}
-                aria-label="Refresh repository"
-                disabled={busy}
-                onClick={refresh}
-              >
-                <RefreshCw size={16} className={busy ? "spin" : ""} />
               </button>
               <button
                 className={`feedback-toggle ${feedback ? "active" : ""}`}
