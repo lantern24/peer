@@ -373,6 +373,7 @@ impl Inspector {
                 .or_else(|| snapshot.data.repository.head.clone()),
             side: None,
             line: None,
+            end_line: None,
             line_text: None,
             context_before: vec![],
             context_after: vec![],
@@ -401,21 +402,26 @@ impl Inspector {
                 .split_inclusive('\n')
                 .map(|s| s.strip_suffix('\n').unwrap_or(s))
                 .collect();
-            if line == 0 || line as usize > lines.len() {
-                return Err("Line is outside the file".into());
+            let end_line = input.end_line.unwrap_or(line);
+            if line == 0 || end_line < line || end_line as usize > lines.len() {
+                return Err("Line range is outside the file or reversed".into());
             }
             let index = line as usize - 1;
+            let end = end_line as usize;
             anchor.side = input.side;
             anchor.line = Some(line);
-            anchor.line_text = Some(lines[index].into());
+            anchor.end_line = (end_line != line).then_some(end_line);
+            anchor.line_text = Some(lines[index..end].join("\n"));
             anchor.context_before = lines[index.saturating_sub(3)..index]
                 .iter()
                 .map(|s| s.to_string())
                 .collect();
-            anchor.context_after = lines[index + 1..(index + 4).min(lines.len())]
+            anchor.context_after = lines[end..(end + 3).min(lines.len())]
                 .iter()
                 .map(|s| s.to_string())
                 .collect();
+        } else if input.end_line.is_some() {
+            return Err("An end line requires a start line".into());
         } else if input.side.is_some() {
             return Err("File comments do not have a diff side".into());
         }
@@ -501,10 +507,13 @@ impl Inspector {
     }
     pub async fn export(&self, snapshot_id: &str) -> Result<String, String> {
         #[derive(serde::Serialize)]
+        #[serde(rename_all = "camelCase")]
         struct Feedback<'a> {
             file: &'a str,
             #[serde(skip_serializing_if = "Option::is_none")]
             line: Option<u32>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            end_line: Option<u32>,
             #[serde(skip_serializing_if = "Option::is_none")]
             side: Option<&'a str>,
             comment: &'a str,
@@ -522,6 +531,10 @@ impl Inspector {
                 Feedback {
                     file: &comment.path,
                     line,
+                    end_line: comment
+                        .anchor
+                        .end_line
+                        .filter(|end| line.is_some_and(|start| *end > start)),
                     side: comment
                         .anchor
                         .side

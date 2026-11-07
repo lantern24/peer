@@ -754,7 +754,12 @@ export default function App() {
     if (snapshotRef.current?.id === s.id) setQueue(next);
   }, []);
   const beginComment = useCallback(
-    async (id: string, line?: number, side?: "old" | "new") => {
+    async (
+      id: string,
+      line?: number,
+      side?: "old" | "new",
+      endLine?: number,
+    ) => {
       const s = snapshotRef.current;
       if (!s) return;
       setFeedback(true);
@@ -775,6 +780,7 @@ export default function App() {
             fingerprint: content.fingerprint,
             path: content.path,
             line,
+            endLine,
             side,
             body: prev[s.queueId]?.body ?? "",
           },
@@ -817,6 +823,7 @@ export default function App() {
         ...source,
         body: draft.body,
         line: draft.line ?? null,
+        endLine: draft.endLine ?? null,
         side: draft.side ?? null,
       });
       setDrafts((prev) =>
@@ -866,7 +873,12 @@ export default function App() {
         );
         return;
       }
-      void navigation.review(file.id, comment.anchor.line, comment.anchor.side);
+      void navigation.review(
+        file.id,
+        comment.anchor.line,
+        comment.anchor.side,
+        comment.anchor.endLine,
+      );
     },
     [notify, navigation.review],
   );

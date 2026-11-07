@@ -52,7 +52,12 @@ import {
   type DiagnosticFields,
 } from "./diagnostics";
 export type ViewerHandle = {
-  jump: (id: string, line?: number, side?: "old" | "new") => void;
+  jump: (
+    id: string,
+    line?: number,
+    side?: "old" | "new",
+    endLine?: number,
+  ) => void;
   scrollTop: () => number;
   restore: (top: number) => void;
   capture: () => ViewportState;
@@ -69,7 +74,12 @@ type Props = {
   preferences: Preferences;
   theme: Theme;
   onLoad: (id: string, force?: boolean) => void;
-  onComment: (id: string, line?: number, side?: "old" | "new") => void;
+  onComment: (
+    id: string,
+    line?: number,
+    side?: "old" | "new",
+    endLine?: number,
+  ) => void;
   onReviewed: (id: string, checked: boolean) => void;
   onScroll: (top: number) => void;
   onActiveFileChange: (snapshotId: string, id: string) => void;
@@ -130,11 +140,8 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
     } | null>(null);
     const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
     const [highlighterVersion, setHighlighterVersion] = useState(0);
-    const [selectedLine, setSelectedLine] = useState<{
-      id: string;
-      line: number;
-      side?: "old" | "new";
-    } | null>(null);
+    const [selectedLine, setSelectedLine] =
+      useState<ViewportState["selectedLine"]>(null);
     const pool = useWorkerPool();
     const refs = useRef(props);
     refs.current = props;
@@ -148,6 +155,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
     const pendingJump = useRef<{
       id: string;
       line?: number;
+      endLine?: number;
       side?: "old" | "new";
       selectLine: boolean;
     } | null>(null);
@@ -549,7 +557,13 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
     }, [pool, theme, onError]);
 
     const navigate = useCallback(
-      (id: string, line?: number, side?: "old" | "new", selectLine = true) => {
+      (
+        id: string,
+        line?: number,
+        side?: "old" | "new",
+        endLine?: number,
+        selectLine = true,
+      ) => {
         const handle = viewer.current;
         recordDiagnostic("viewer.jump", {
           ...diagnosticFile(refs.current.snapshot, id),
@@ -596,7 +610,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
                   id,
                   range: {
                     start: line,
-                    end: line,
+                    end: endLine ?? line,
                     ...(refs.current.snapshot.comparison.view === "changes"
                       ? {
                           side:
@@ -609,7 +623,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
                 }
               : null,
           );
-          setSelectedLine(selectLine ? { id, line, side } : null);
+          setSelectedLine(selectLine ? { id, line, side, endLine } : null);
           instance?.render(true);
           const current = refs.current;
           const match = current.findMatch;
@@ -630,7 +644,13 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
       [revealSearchMatch],
     );
     const jump = useCallback(
-      (id: string, line?: number, side?: "old" | "new", selectLine = true) => {
+      (
+        id: string,
+        line?: number,
+        side?: "old" | "new",
+        endLine?: number,
+        selectLine = true,
+      ) => {
         targetRange.current = null;
         restoring.current = null;
         setCollapsed((current) => {
@@ -646,9 +666,9 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
           collapsed.has(id) ||
           viewer.current?.getInstance()?.getTopForItem(id) === undefined;
         pendingJump.current = needsRetry
-          ? { id, line, side, selectLine }
+          ? { id, line, side, endLine, selectLine }
           : null;
-        navigate(id, line, side, selectLine);
+        navigate(id, line, side, endLine, selectLine);
         refs.current.onLoad(id);
       },
       [navigate, collapsed],
@@ -677,7 +697,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
         reveal: (id, range, side) => {
           // The symbol highlight identifies the destination. A renderer line
           // selection would pin the comment utility instead of following hover.
-          jump(id, range.start.line + 1, side, false);
+          jump(id, range.start.line + 1, side, undefined, false);
           symbol.current = { id, side: side ?? "new", position: range.start };
           targetRange.current = { id, range, side: side ?? "new" };
           queueMicrotask(highlightTarget);
@@ -833,7 +853,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
             version,
             collapsed: isCollapsed,
             annotations: comments.map((c) => ({
-              lineNumber: c.anchor.line ?? 0,
+              lineNumber: c.anchor.endLine ?? c.anchor.line ?? 0,
               side: c.anchor.side === "old" ? "deletions" : "additions",
               metadata: c,
             })),
@@ -886,7 +906,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
             version,
             collapsed: isCollapsed,
             annotations: comments.map((c) => ({
-              lineNumber: c.anchor.line ?? 0,
+              lineNumber: c.anchor.endLine ?? c.anchor.line ?? 0,
               metadata: c,
             })),
           };
@@ -907,7 +927,13 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
     useEffect(() => {
       const target = pendingJump.current;
       if (target && loaded[target.id] && !loaded[target.id].content.deferred) {
-        navigate(target.id, target.line, target.side, target.selectLine);
+        navigate(
+          target.id,
+          target.line,
+          target.side,
+          target.endLine,
+          target.selectLine,
+        );
         pendingJump.current = null;
       }
     }, [items, loaded, navigate, selected]);
@@ -1042,7 +1068,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
           id: state.selectedLine.id,
           range: {
             start: state.selectedLine.line,
-            end: state.selectedLine.line,
+            end: state.selectedLine.endLine ?? state.selectedLine.line,
             ...(snapshot.comparison.view === "changes"
               ? {
                   side:
@@ -1112,6 +1138,38 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
             event.preventDefault();
             refs.current.onNavigate?.(target, "auto");
           }
+        },
+        onLineNumberClick(line, context) {
+          targetRange.current = null;
+          const event = line.event;
+          if (
+            refs.current.navigationOnly ||
+            !matchesShortcut("selectCommentRange", {
+              key: "click",
+              ctrlKey: event.ctrlKey,
+              metaKey: event.metaKey,
+              altKey: event.altKey,
+              shiftKey: event.shiftKey,
+            })
+          )
+            return;
+          event.preventDefault();
+          const handle = viewer.current;
+          const selection = handle?.getSelectedLines();
+          const side =
+            line.type === "diff-line" ? line.annotationSide : undefined;
+          const sameSide =
+            selection?.id === context.item.id &&
+            selection.range.side === side &&
+            (selection.range.endSide ?? side) === side;
+          handle?.setSelectedLines({
+            id: context.item.id,
+            range: {
+              start: sameSide ? selection.range.start : line.lineNumber,
+              end: line.lineNumber,
+              side,
+            },
+          });
         },
         onLineClick(line, context) {
           targetRange.current = null;
@@ -1354,6 +1412,38 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
       <div
         ref={surface}
         className="viewer-surface"
+        onPointerDownCapture={(event) => {
+          if (
+            props.navigationOnly ||
+            event.button !== 0 ||
+            !matchesShortcut("selectCommentRange", {
+              key: "click",
+              ctrlKey: event.ctrlKey,
+              metaKey: event.metaKey,
+              altKey: event.altKey,
+              shiftKey: event.shiftKey,
+            })
+          )
+            return;
+          const path = event.nativeEvent.composedPath();
+          if (
+            path.some(
+              (node) =>
+                node instanceof HTMLElement &&
+                node.hasAttribute("data-column-number"),
+            ) &&
+            !path.some(
+              (node) =>
+                node instanceof HTMLElement &&
+                node.classList.contains("gutter-comment"),
+            )
+          ) {
+            // Preserve the first endpoint until onLineNumberClick runs;
+            // otherwise the renderer replaces it on pointerdown.
+            event.preventDefault();
+            event.stopPropagation();
+          }
+        }}
         onContextMenu={(event) => {
           const path = event.nativeEvent.composedPath();
           const line = path.find(
@@ -1385,17 +1475,22 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
           className="code-view"
           items={items}
           options={options}
-          onSelectedLinesChange={(selection) =>
+          onSelectedLinesChange={(selection) => {
+            const range = selection?.range;
             setSelectedLine(
-              selection
+              selection && range && (range.endSide ?? range.side) === range.side
                 ? {
                     id: selection.id,
-                    line: selection.range.start,
-                    side: selection.range.side === "deletions" ? "old" : "new",
+                    line: Math.min(range.start, range.end),
+                    endLine:
+                      range.start === range.end
+                        ? undefined
+                        : Math.max(range.start, range.end),
+                    side: range.side === "deletions" ? "old" : "new",
                   }
                 : null,
-            )
-          }
+            );
+          }}
           onScroll={(top, instance) => {
             scroll.current = top;
             const current = refs.current;
@@ -1430,6 +1525,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
             <button
               className="gutter-comment"
               aria-label="Comment on line"
+              title={`Comment on line or selected range (${shortcutLabel("selectCommentRange")} on line numbers)`}
               onPointerDownCapture={(event) => {
                 // Keep the renderer's line-selection gesture from moving the
                 // slotted + button before its click can open the composer.
@@ -1443,14 +1539,29 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
                   loaded[item.id].content.deferred
                 )
                   return;
+                const side = "side" in hovered ? hovered.side : undefined;
+                const selection = viewer.current?.getSelectedLines();
+                const range = selection?.range;
+                const inRange =
+                  selection?.id === item.id &&
+                  range &&
+                  range.side === side &&
+                  (range.endSide ?? side) === side &&
+                  hovered.lineNumber >= Math.min(range.start, range.end) &&
+                  hovered.lineNumber <= Math.max(range.start, range.end);
+                const start = inRange
+                  ? Math.min(range.start, range.end)
+                  : hovered.lineNumber;
+                const end = inRange ? Math.max(range.start, range.end) : start;
                 onComment(
                   item.id,
-                  hovered.lineNumber,
+                  start,
                   snapshot.comparison.view === "changes"
-                    ? "side" in hovered && hovered.side === "deletions"
+                    ? side === "deletions"
                       ? "old"
                       : "new"
                     : undefined,
+                  end > start ? end : undefined,
                 );
               }}
             >
@@ -1465,7 +1576,9 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
                 <span className="muted">
                   {annotation.metadata.scope === "file"
                     ? "File comment"
-                    : `Line ${annotation.metadata.anchor.line}`}
+                    : annotation.metadata.anchor.endLine
+                      ? `Lines ${annotation.metadata.anchor.line}–${annotation.metadata.anchor.endLine}`
+                      : `Line ${annotation.metadata.anchor.line}`}
                 </span>
               </div>
               <p>{annotation.metadata.body}</p>

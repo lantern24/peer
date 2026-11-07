@@ -19,6 +19,7 @@ export type Draft = {
   fingerprint: string;
   path: string;
   line?: number;
+  endLine?: number;
   side?: "old" | "new";
   body: string;
   error?: string;
@@ -177,7 +178,7 @@ export function Feedback({
             </div>
             <div className="comment-location">
               {draft.line
-                ? `${draft.side === "old" ? "Old " : ""}line ${draft.line}`
+                ? `${draft.side === "old" ? "Old " : ""}${draft.endLine ? `lines ${draft.line}–${draft.endLine}` : `line ${draft.line}`}`
                 : "File comment"}
             </div>
             <textarea
@@ -240,8 +241,10 @@ export function Feedback({
             <MessageSquare size={28} strokeWidth={1.3} />
             <h3>Leave a little context.</h3>
             <p>
-              Use the + beside a line or comment on a file. Your feedback
-              collects here, ready for your coding agent.
+              Use the + beside a line or comment on a file. For a range, use{" "}
+              {shortcutLabel("selectCommentRange")} on the first and last line
+              numbers, then +. Your feedback collects here, ready for your
+              coding agent.
             </p>
             <span>Only this review’s comments appear here.</span>
           </div>
@@ -261,7 +264,7 @@ export function Feedback({
             </button>
             <div className="comment-location">
               {comment.anchor.line
-                ? `${comment.anchor.side === "old" ? "Old " : ""}line ${comment.anchor.line}`
+                ? `${comment.anchor.side === "old" ? "Old " : ""}${comment.anchor.endLine ? `lines ${comment.anchor.line}–${comment.anchor.endLine}` : `line ${comment.anchor.line}`}`
                 : "File comment"}
               {comment.outdated && (
                 <span className="outdated-tag">Outdated</span>

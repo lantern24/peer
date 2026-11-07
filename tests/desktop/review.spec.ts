@@ -116,6 +116,96 @@ async function addFileComment(body: string) {
   );
 }
 
+type RangeLineType = "context" | "change-addition" | "change-deletion";
+
+async function clickRangeEndpoint(
+  line: number,
+  type: RangeLineType,
+  path = "src/module-000.ts",
+  modified = true,
+) {
+  const selector = `[data-column-number="${line}"][data-line-type="${type}"]`;
+  await browser.waitUntil(() =>
+    browser.execute(
+      (path, selector) =>
+        !!document
+          .querySelector(`[data-file-path="${path}"]`)
+          ?.closest("diffs-container")
+          ?.shadowRoot?.querySelector(selector),
+      path,
+      selector,
+    ),
+  );
+  await browser.execute(
+    async (path, selector, modified) => {
+      const root = document
+        .querySelector(`[data-file-path="${path}"]`)
+        ?.closest("diffs-container")?.shadowRoot;
+      const gutter = root?.querySelector(selector);
+      if (!gutter) throw new Error("Range endpoint is not rendered");
+      const rect = gutter.getBoundingClientRect();
+      const mac = /Mac|iPhone|iPad/.test(navigator.platform);
+      const pointer = {
+        bubbles: true,
+        composed: true,
+        cancelable: true,
+        pointerType: "mouse",
+        pointerId: 1,
+        button: 0,
+        metaKey: modified && mac,
+        ctrlKey: modified && !mac,
+        clientX: rect.left + rect.width / 2,
+        clientY: rect.top + rect.height / 2,
+      };
+      let target = document.elementFromPoint(pointer.clientX, pointer.clientY);
+      while (target?.shadowRoot) {
+        const inner = target.shadowRoot.elementFromPoint(
+          pointer.clientX,
+          pointer.clientY,
+        );
+        if (!inner || inner === target) break;
+        target = inner;
+      }
+      if (!target || !gutter.contains(target))
+        throw new Error("Range endpoint gutter is not hit-testable");
+      target.dispatchEvent(new PointerEvent("pointermove", pointer));
+      const pressed = target.dispatchEvent(
+        new PointerEvent("pointerdown", { ...pointer, buttons: 1 }),
+      );
+      if (pressed)
+        target.dispatchEvent(
+          new MouseEvent("mousedown", { ...pointer, buttons: 1 }),
+        );
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => resolve()),
+      );
+      target.dispatchEvent(new PointerEvent("pointerup", pointer));
+      target.dispatchEvent(new MouseEvent("mouseup", pointer));
+      target.dispatchEvent(new MouseEvent("click", pointer));
+    },
+    path,
+    selector,
+    modified,
+  );
+}
+
+async function expectRangeHighlight(type: RangeLineType) {
+  await browser.waitUntil(() =>
+    browser.execute((type) => {
+      const root = document
+        .querySelector('[data-file-path="src/module-000.ts"]')
+        ?.closest("diffs-container")?.shadowRoot;
+      return [2, 3, 4].every((line) =>
+        root?.querySelector(
+          `[data-code] [data-line="${line}"][data-selected-line]${
+            line === 3 ? "" : `[data-line-type="${type}"]`
+          }`,
+        ),
+      );
+    }, type),
+  );
+}
+
 describe("Peer in the native webview", () => {
   let originalPreferences: Preferences;
   const originalFiles = new Map<string, string>();
@@ -1002,6 +1092,187 @@ describe("Peer in the native webview", () => {
       "/tmp/unsaved-gopls",
     );
     await click('[aria-label="Close dialog"]');
+  });
+
+  for (const view of ["Code", "unified", "split"] as const) {
+    for (const side of view === "Code"
+      ? (["new"] as const)
+      : (["old", "new"] as const)) {
+      it(`persists and exports an inclusive reversed range in ${view} ${side}`, async () => {
+        if (view === "Code") await switchView("Code");
+        if (view === "split") await click('[aria-label="Toggle diff layout"]');
+        const type: RangeLineType =
+          view === "Code"
+            ? "context"
+            : side === "old"
+              ? "change-deletion"
+              : "change-addition";
+        const path = "src/module-000.ts";
+        const body = `Inclusive range ${view} ${side}`;
+        const location = `${side === "old" ? "Old " : ""}lines 2–4`;
+        const source =
+          side === "old"
+            ? execFileSync("git", ["show", `HEAD:${path}`], {
+                cwd: process.env.PEER_TEST_REPO,
+                encoding: "utf8",
+              })
+            : originalFiles.get(path);
+        if (source === undefined) throw new Error("Missing range fixture");
+        const lines = source.split("\n");
+        const rangeText = lines.slice(1, 4).join("\n");
+        await clickRangeEndpoint(4, type);
+        await clickRangeEndpoint(2, type);
+        await expectRangeHighlight(type);
+        await clickLineComment(4, type);
+        await expect($(".comment-composer .comment-location")).toHaveText(
+          location,
+        );
+        await expect($('[aria-label="Comment text"]')).toBeFocused();
+        await browser.keys(body);
+        await click('[aria-label="Refresh repository"]');
+        await $('[aria-label="Refresh repository"]').waitForEnabled();
+        await expect($('[aria-label="Comment text"]')).toHaveValue(body);
+        await expect($(".comment-composer .comment-location")).toHaveText(
+          location,
+        );
+        await click("button=Add comment");
+        await expect($(".comment-card .comment-location")).toHaveText(location);
+        expect(
+          await browser.execute(
+            () =>
+              document.querySelector(".comment-card .comment-context")
+                ?.textContent,
+          ),
+        ).toBe(rangeText);
+        const saved: { queues: Record<string, ReviewQueue> } = JSON.parse(
+          readFileSync(join(process.env.PEER_DATA_DIR!, "state.json"), "utf8"),
+        );
+        const comment = Object.values(saved.queues)
+          .flatMap((queue) => queue.comments)
+          .find((comment) => comment.body === body);
+        expect(comment?.scope).toBe("line");
+        expect(comment?.anchor.line).toBe(2);
+        expect(comment?.anchor.endLine).toBe(4);
+        expect(comment?.anchor.side).toBe(view === "Code" ? undefined : side);
+        expect(comment?.anchor.lineText).toBe(rangeText);
+        expect(comment?.anchor.contextBefore?.at(-1)).toBe(lines[0]);
+        expect(comment?.anchor.contextAfter?.[0]).toBe(lines[4]);
+        await reloadApp();
+        await $('[aria-label="Refresh repository"]').waitForEnabled();
+        await expect($(".comment-card .comment-location")).toHaveText(location);
+        await click('.tree-file[title="src/module-001.ts"]');
+        await click(".comment-card .comment-path");
+        await expectRangeHighlight(type);
+        await browser.saveScreenshot(
+          resolve(`test-results/range-${view}-${side}.png`),
+        );
+        if (await $(".feedback-copy-option input").isSelected())
+          await click(".feedback-copy-option input");
+        await click("button=Copy comments");
+        await expect($(".toast")).toHaveText(expect.stringContaining("copied"));
+        const copied = await browser.execute(() =>
+          (window as unknown as TauriWindow).__TAURI__.core.invoke<string>(
+            "plugin:clipboard-manager|read_text",
+          ),
+        );
+        expect(JSON.parse(copied)).toEqual([
+          {
+            file: path,
+            line: 2,
+            endLine: 4,
+            ...(side === "old" ? { side: "old" } : {}),
+            comment: body,
+          },
+        ]);
+      });
+    }
+
+    it(`keeps range drafts while retargeting across lines, sides, and files in ${view}`, async () => {
+      if (view === "Code") await switchView("Code");
+      if (view === "split") await click('[aria-label="Toggle diff layout"]');
+      const type = view === "Code" ? "context" : "change-addition";
+      await clickRangeEndpoint(2, type);
+      await clickRangeEndpoint(4, type);
+      await clickLineComment(4, type);
+      await browser.keys("Retain range draft");
+      // A plain line-number click replaces the range with a single line.
+      await clickRangeEndpoint(6, type, "src/module-000.ts", false);
+      await clickLineComment(6, type);
+      await expect($(".comment-composer .comment-location")).toHaveText(
+        "line 6",
+      );
+      await expect($('[aria-label="Comment text"]')).toHaveValue(
+        "Retain range draft",
+      );
+      await clickRangeEndpoint(8, type);
+      if (view !== "Code") {
+        // The second endpoint on the other side must start a new selection.
+        await clickRangeEndpoint(2, "change-deletion");
+        await clickLineComment(2, "change-deletion");
+        await expect($(".comment-composer .comment-location")).toHaveText(
+          "Old line 2",
+        );
+      }
+      await click('.tree-file[title="src/module-001.ts"]');
+      await expect($(".comment-composer .comment-path")).toHaveText(
+        "src/module-000.ts",
+      );
+      await clickRangeEndpoint(4, type, "src/module-001.ts");
+      await clickLineComment(4, type, "src/module-001.ts");
+      await expect($(".comment-composer .comment-location")).toHaveText(
+        "line 4",
+      );
+      await expect($(".comment-composer .comment-path")).toHaveText(
+        "src/module-001.ts",
+      );
+      await expect($('[aria-label="Comment text"]')).toHaveValue(
+        "Retain range draft",
+      );
+      await click("button=Add comment");
+      await expect($(".comment-card .comment-location")).toHaveText("line 4");
+      const saved: { queues: Record<string, ReviewQueue> } = JSON.parse(
+        readFileSync(join(process.env.PEER_DATA_DIR!, "state.json"), "utf8"),
+      );
+      const comment = Object.values(saved.queues)
+        .flatMap((queue) => queue.comments)
+        .find((comment) => comment.body === "Retain range draft");
+      expect(comment?.path).toBe("src/module-001.ts");
+      expect(comment?.anchor.line).toBe(4);
+      expect(comment?.anchor.endLine).toBeUndefined();
+      await click("button=Copy comments");
+      await expect($(".toast")).toHaveText(expect.stringContaining("copied"));
+      const copied = await browser.execute(() =>
+        (window as unknown as TauriWindow).__TAURI__.core.invoke<string>(
+          "plugin:clipboard-manager|read_text",
+        ),
+      );
+      expect(JSON.parse(copied)).toEqual([
+        {
+          file: "src/module-001.ts",
+          line: 4,
+          comment: "Retain range draft",
+        },
+      ]);
+    });
+  }
+
+  it("selects a range with Ctrl on an emulated non-Mac platform", async () => {
+    // This emulates modifier routing, not a native Linux/Windows WebView.
+    // beforeEach reloads the document and restores navigator.platform.
+    await browser.execute(() => {
+      Object.defineProperty(navigator, "platform", {
+        configurable: true,
+        value: "Linux x86_64",
+      });
+    });
+    await switchView("Code");
+    await clickRangeEndpoint(2, "context");
+    await clickRangeEndpoint(4, "context");
+    await clickLineComment(4, "context");
+    await expect($(".comment-composer .comment-location")).toHaveText(
+      "lines 2–4",
+    );
+    await expectRangeHighlight("context");
   });
 
   for (const view of ["Code", "unified", "split"] as const) {

@@ -78,6 +78,7 @@ export type Anchor = {
   headCommit?: string;
   side?: "old" | "new";
   line?: number;
+  endLine?: number;
   lineText?: string;
   contextBefore: string[];
   contextAfter: string[];
@@ -106,6 +107,7 @@ export type NewComment = {
   body: string;
   side: "old" | "new" | null;
   line: number | null;
+  endLine: number | null;
 };
 export type Appearance = {
   mode: "system" | "light" | "dark";

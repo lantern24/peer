@@ -53,6 +53,10 @@ Settings is organized into **Appearance**, **Viewer**, **Code navigation**, and 
 
 Use the gutter **+** to comment on a line, or a file header's comment button for a file comment. Comments can be edited, deleted individually, or cleared from the active queue. Changes files can be marked Reviewed. Feedback is stored per worktree and branch, with distinct Code and comparison queues.
 
+To comment on multiple lines, hold **⌘** on macOS or **Ctrl** on Windows/Linux and click the first and last **line numbers**, then click the gutter **+** at the bottom of the selection. Both endpoints are included, in either click order. Ranges stay within one file and one diff side; choosing another file or side starts a new selection. A plain line-number click replaces the range with a single line. Selecting a location and clicking **+** reuses any existing draft text. Cmd/Ctrl-click on source text still navigates to its definition.
+
+Range comments show their start/end lines and retain the complete selected source as saved context. Clicking a saved comment's path returns to and highlights its range, unless it is outdated.
+
 Refresh marks comments outdated when their file fingerprint changes, and resets Reviewed for changed files. Original anchors and context remain intact, including feedback on files that disappear. Drafts survive theme and view switching during the session; only saved comments survive application restarts.
 
 If the source changes while you are writing, Peer rejects submission rather than attaching the draft to different code. The error appears inside the comment editor, with **Refresh** and, when the file is still in the view, **Review file** actions. Refresh alone does not move a draft's anchor to changed content: review the refreshed source, then click the gutter **+** at the intended line or the file header's comment button. This reuses your draft text at the explicitly chosen location; you can then choose **Add comment**. If the original file disappeared, select another file or discard the draft. Drafts whose file content is unchanged can still be submitted after refresh without choosing a new location.
@@ -76,11 +80,17 @@ The toolbar Refresh button and Refresh Repository menu command reload immediatel
     "line": 42,
     "comment": "Handle an empty result here."
   },
+  {
+    "file": "src/example.ts",
+    "line": 50,
+    "endLine": 54,
+    "comment": "Keep this validation together."
+  },
   { "file": "README.md", "comment": "Document the setup steps." }
 ]
 ```
 
-File comments omit `line`. Line numbers are one-based; diff comments on the old side additionally include `"side": "old"`. Outdated comments are included with `"outdated": true`, retaining their original location.
+File comments omit `line` and `endLine`. Line numbers are one-based; ranges include both `line` (start) and `endLine` (inclusive end), while single-line comments omit `endLine`. Diff comments on the old side additionally include `"side": "old"`. Outdated comments are included with `"outdated": true`, retaining their original location.
 
 With Feedback open, press **⌘+Shift+C** on macOS or **Ctrl+Shift+C** on Windows/Linux to run **Copy comments**. The shortcut follows the button's enabled state and the **Delete comments after copying** setting. It leaves text fields, editable content, and open dialogs untouched, ignores held-key repeats and text composition, and does not replace ordinary **⌘/Ctrl+C**. The binding is also shown in the button tooltip and keyboard-shortcuts reference.
 
