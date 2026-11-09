@@ -2,6 +2,18 @@
 
 Reference machine: Apple M2, macOS 26.5.2 (25F84 / Darwin 25.5.0). The native app uses WKWebView with a configured 1440 × 940 window. The test-only configuration keeps its window above other windows to avoid occlusion-related rendering pauses; production windows retain normal behavior. Development tools: Rust 1.88 and Node.js 26.7.
 
+## Multi-line review comments — 2026-11-07 JST
+
+Issue #38 adds Cmd/Ctrl-click range endpoints on line numbers, followed by the gutter **+**. The inclusive range stays on one file and diff side. Saved anchors retain the full selected source and surrounding context, and concise exports include `endLine` only for multi-line comments. Existing single-line/file comments remain compatible.
+
+`npm test` passed all 42 frontend/harness tests. `cargo test -p peer-core --locked` passed 79 tests with two optional real-server tests ignored. The core range cases exercise old/new/Code source, CRLF/Unicode, inclusive file boundaries, single-line canonicalization, invalid endpoints/sides, stale-source rejection, reload compatibility, outdated anchors, exports, and unchanged source/index/store invariants. `npm run build:test-app` passed the TypeScript/Vite and native builds; Rust formatting passed.
+
+All nine focused native range scenarios passed in macOS WKWebView. They cover Code and unified/split old/new sides, reversed endpoints, range highlighting, draft retention across refresh and explicit retargeting, cross-side/file selection reset, saved source context, reload persistence, comment jumps, clipboard JSON, and Ctrl routing with an emulated non-Mac platform. Code, unified old-side, and split new-side screenshots were visually inspected.
+
+The broader run passed all 69 scenarios across `review.spec.ts`, `navigation.spec.ts`, and `shortcuts.spec.ts` with `PEER_PERFORMANCE_MODE=report`, including existing single-line/file comments, stale-draft recovery, source navigation and history, refresh, and shortcut guards. This was not a full desktop-suite or hosted-CI run.
+
+The initial native attempt timed out in the pointer helper's animation-frame wait. A temporary probe observed hidden/unfocused WebView state and no animation frame; macOS reported a locked session. After unlocking, all nine scenarios passed unchanged. The diagnostic probe was removed. This is local macOS verification with synthesized pointer/key events, not physical-input or Windows/Linux runtime coverage.
+
 ## Wrapped-search fixture readiness — 2026-10-28 JST
 
 [PR #37's desktop job](https://github.com/lantern24/peer/actions/runs/40693321690/job/122833449157) timed out before finding the viewport-tall source line in Changes. Its screenshot showed `0 / 1` search results and the diff still at the top. The test sent Enter immediately after entering the query, without waiting for the asynchronously loaded source to supply matches.

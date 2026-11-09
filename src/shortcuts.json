@@ -145,6 +145,11 @@
     "action": "Open highlighted file",
     "bindings": [{ "keys": "Enter" }]
   },
+  "selectCommentRange": {
+    "group": "Comments and text editing",
+    "action": "Select comment range endpoints on line numbers, then +",
+    "bindings": [{ "keys": "CmdOrCtrl+click" }]
+  },
   "saveComment": {
     "group": "Comments and text editing",
     "action": "Save comment from its editor",

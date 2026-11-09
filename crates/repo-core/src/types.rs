@@ -132,6 +132,8 @@ pub struct Anchor {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub line: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub end_line: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub line_text: Option<String>,
     pub context_before: Vec<String>,
     pub context_after: Vec<String>,
@@ -170,6 +172,8 @@ pub struct NewComment {
     pub body: String,
     pub side: Option<String>,
     pub line: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end_line: Option<u32>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

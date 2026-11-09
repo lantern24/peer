@@ -72,6 +72,7 @@ async fn relocating_repository_preserves_sessions_and_review_queues_after_restar
             body: snapshot.comparison.view.clone(),
             side: None,
             line: None,
+            end_line: None,
         })
         .await
         .unwrap();
@@ -174,6 +175,7 @@ async fn invalid_relocation_does_not_replace_saved_repositories_or_reviews() {
             body: "Keep this feedback after a failed relocation".into(),
             side: Some("new".into()),
             line: Some(1),
+            end_line: None,
         })
         .await
         .unwrap();
@@ -304,6 +306,7 @@ async fn refresh_retries_when_a_reviewed_file_changes_during_reconciliation() {
         body: "Keep this feedback".into(),
         side: Some("new".into()),
         line: Some(1),
+        end_line: None,
     })
     .await
     .unwrap();
@@ -416,6 +419,7 @@ async fn comments_are_anchored_isolated_persistent_and_outdated() {
             body: "Why remove this?".into(),
             side: Some("old".into()),
             line: Some(1),
+            end_line: None,
         })
         .await
         .unwrap();
@@ -438,7 +442,8 @@ async fn comments_are_anchored_isolated_persistent_and_outdated() {
             fingerprint: content.fingerprint.clone(),
             body: "bad".into(),
             side: Some("new".into()),
-            line: Some(0)
+            line: Some(0),
+            end_line: None,
         })
         .await
         .is_err());
@@ -505,6 +510,7 @@ async fn concise_exports_keep_locations_and_queue_contents_without_internal_meta
             fingerprint: content.fingerprint.clone(),
             body: body.into(),
             line: Some(2),
+            end_line: None,
             side: changes.then(|| "new".into()),
         })
         .await
@@ -515,6 +521,7 @@ async fn concise_exports_keep_locations_and_queue_contents_without_internal_meta
             fingerprint: content.fingerprint.clone(),
             body: "Clarify this file's purpose.".into(),
             line: None,
+            end_line: None,
             side: None,
         })
         .await
@@ -533,6 +540,7 @@ async fn concise_exports_keep_locations_and_queue_contents_without_internal_meta
                 fingerprint: content.fingerprint.clone(),
                 body: "Explain the original line.".into(),
                 line: Some(1),
+                end_line: None,
                 side: Some("old".into()),
             })
             .await
@@ -552,6 +560,246 @@ async fn concise_exports_keep_locations_and_queue_contents_without_internal_meta
         assert_eq!(retained.comments[0].anchor.fingerprint, content.fingerprint);
         assert!(retained.comments[0].anchor.line_text.is_some());
         assert!(!retained.comments[0].id.is_empty());
+    }
+}
+
+#[tokio::test]
+async fn range_comments_preserve_source_context_locations_and_legacy_comments_after_reload() {
+    let old_text =
+        "before\r\nold α\r\nold β\r\nold γ\r\nafter one\r\nafter two\r\nafter three\r\nlast\r\n";
+    let new_text =
+        "before\r\nnew α\r\nnew β\r\nnew γ\r\nafter one\r\nafter two\r\nafter three\r\nlast";
+    for (comparison, side, selected) in [
+        (mode("all"), Some("old"), "old α\r\nold β\r\nold γ\r"),
+        (mode("all"), Some("new"), "new α\r\nnew β\r\nnew γ\r"),
+        (code(), None, "new α\r\nnew β\r\nnew γ\r"),
+    ] {
+        let repo = fixture();
+        let store = tempfile::tempdir().unwrap();
+        fs::write(repo.path().join("hello.ts"), old_text).unwrap();
+        git(repo.path(), &["add", "hello.ts"]);
+        git(repo.path(), &["commit", "-m", "range source"]);
+        fs::write(repo.path().join("hello.ts"), new_text).unwrap();
+        let index_before = fs::read(repo.path().join(".git/index")).unwrap();
+        let app = Inspector::new(store.path()).unwrap();
+        let snapshot = app
+            .open_repository(repo.path().to_str().unwrap(), Some(comparison.clone()))
+            .await
+            .unwrap();
+        let file = snapshot
+            .files
+            .iter()
+            .find(|f| f.path == "hello.ts")
+            .unwrap();
+        let content = app.read_file(&snapshot.id, &file.id, false).await.unwrap();
+        let input = NewComment {
+            snapshot_id: snapshot.id.clone(),
+            file_id: file.id.clone(),
+            fingerprint: content.fingerprint,
+            body: "Review these lines".into(),
+            side: side.map(str::to_owned),
+            line: Some(2),
+            end_line: Some(4),
+        };
+        let range = app.add_comment(input.clone()).await.unwrap();
+        assert_eq!(range.scope, "line");
+        assert_eq!(range.anchor.line_text.as_deref(), Some(selected));
+        assert_eq!(range.anchor.context_before, ["before\r"]);
+        assert_eq!(
+            range.anchor.context_after,
+            ["after one\r", "after two\r", "after three\r"]
+        );
+        let full = app
+            .add_comment(NewComment {
+                line: Some(1),
+                end_line: Some(8),
+                body: "Whole source".into(),
+                ..input.clone()
+            })
+            .await
+            .unwrap();
+        assert!(full.anchor.context_before.is_empty());
+        assert!(full.anchor.context_after.is_empty());
+        assert_eq!(
+            full.anchor.line_text.as_deref(),
+            Some(if side == Some("old") {
+                old_text.strip_suffix('\n').unwrap()
+            } else {
+                new_text
+            })
+        );
+        let single = app
+            .add_comment(NewComment {
+                end_line: Some(2),
+                body: "One line".into(),
+                ..input
+            })
+            .await
+            .unwrap();
+        assert_eq!(single.anchor.end_line, None);
+        assert_eq!(single.anchor.line, Some(2));
+        let original_anchor = serde_json::to_value(&range.anchor).unwrap();
+        assert_eq!(original_anchor["endLine"], 4);
+        // This on-disk single-line anchor has the same shape as pre-range state.
+        let stored: serde_json::Value =
+            serde_json::from_slice(&fs::read(store.path().join("state.json")).unwrap()).unwrap();
+        assert!(
+            stored["queues"][&snapshot.queue_id]["comments"][2]["anchor"]
+                .get("endLine")
+                .is_none()
+        );
+        drop(app);
+
+        let app = Inspector::new(store.path()).unwrap();
+        let restored = app
+            .open_repository(repo.path().to_str().unwrap(), Some(comparison.clone()))
+            .await
+            .unwrap();
+        let queue = app.queue(&restored.id).await.unwrap();
+        assert_eq!(
+            serde_json::to_value(&queue.comments[0].anchor).unwrap(),
+            original_anchor
+        );
+        assert!(!queue.comments[0].outdated);
+        assert_eq!(queue.comments[2].anchor.end_line, None);
+        let exported: serde_json::Value =
+            serde_json::from_str(&app.export(&restored.id).await.unwrap()).unwrap();
+        let mut expected = serde_json::json!({
+            "file": "hello.ts", "line": 2, "endLine": 4, "comment": "Review these lines"
+        });
+        if side == Some("old") {
+            expected["side"] = "old".into();
+        }
+        assert_eq!(exported[0], expected);
+        assert!(exported[2].get("endLine").is_none());
+        assert_eq!(
+            fs::read(repo.path().join(".git/index")).unwrap(),
+            index_before
+        );
+        assert_eq!(
+            fs::read_to_string(repo.path().join("hello.ts")).unwrap(),
+            new_text
+        );
+
+        fs::write(repo.path().join("hello.ts"), "changed after review\n").unwrap();
+        let state_before = fs::read(store.path().join("state.json")).unwrap();
+        let restored_file = restored
+            .files
+            .iter()
+            .find(|f| f.path == "hello.ts")
+            .unwrap();
+        assert!(app
+            .add_comment(NewComment {
+                snapshot_id: restored.id.clone(),
+                file_id: restored_file.id.clone(),
+                fingerprint: range.anchor.fingerprint.clone(),
+                body: "Do not attach this to changed source".into(),
+                side: side.map(str::to_owned),
+                line: Some(2),
+                end_line: Some(4),
+            })
+            .await
+            .is_err());
+        assert_eq!(
+            fs::read(store.path().join("state.json")).unwrap(),
+            state_before
+        );
+        drop(app);
+        let app = Inspector::new(store.path()).unwrap();
+        let refreshed = app
+            .open_repository(repo.path().to_str().unwrap(), Some(comparison))
+            .await
+            .unwrap();
+        let queue = app.queue(&refreshed.id).await.unwrap();
+        assert!(queue.comments[0].outdated);
+        assert_eq!(
+            serde_json::to_value(&queue.comments[0].anchor).unwrap(),
+            original_anchor
+        );
+        expected["outdated"] = true.into();
+        let exported: serde_json::Value =
+            serde_json::from_str(&app.export(&refreshed.id).await.unwrap()).unwrap();
+        assert_eq!(exported[0], expected);
+    }
+}
+
+#[tokio::test]
+async fn range_comments_reject_invalid_endpoints_sides_and_stale_sources_without_saving() {
+    let repo = fixture();
+    let store = tempfile::tempdir().unwrap();
+    let app = Inspector::new(store.path()).unwrap();
+    fs::write(repo.path().join("hello.ts"), "first\nsecond\nthird\n").unwrap();
+    for comparison in [mode("all"), code()] {
+        let changes = comparison.view == "changes";
+        let snapshot = app
+            .open_repository(repo.path().to_str().unwrap(), Some(comparison))
+            .await
+            .unwrap();
+        let file = snapshot
+            .files
+            .iter()
+            .find(|f| f.path == "hello.ts")
+            .unwrap();
+        let content = app.read_file(&snapshot.id, &file.id, false).await.unwrap();
+        let input = NewComment {
+            snapshot_id: snapshot.id.clone(),
+            file_id: file.id.clone(),
+            fingerprint: content.fingerprint,
+            body: "Invalid range".into(),
+            side: changes.then(|| "new".into()),
+            line: Some(1),
+            end_line: Some(2),
+        };
+        let state_before = fs::read(store.path().join("state.json")).unwrap();
+        for (line, end_line) in [
+            (None, Some(2)),
+            (None, Some(0)),
+            (Some(0), Some(2)),
+            (Some(1), Some(0)),
+            (Some(3), Some(2)),
+            (Some(1), Some(4)),
+            (Some(4), Some(4)),
+            (Some(1), Some(u32::MAX)),
+        ] {
+            assert!(app
+                .add_comment(NewComment {
+                    line,
+                    end_line,
+                    ..input.clone()
+                })
+                .await
+                .is_err());
+        }
+        assert!(app
+            .add_comment(NewComment {
+                side: if changes { None } else { Some("new".into()) },
+                ..input.clone()
+            })
+            .await
+            .is_err());
+        if changes {
+            // The new side has three lines, but the old side has only two.
+            assert!(app
+                .add_comment(NewComment {
+                    side: Some("old".into()),
+                    end_line: Some(3),
+                    ..input.clone()
+                })
+                .await
+                .is_err());
+        }
+        assert!(app
+            .add_comment(NewComment {
+                fingerprint: "stale fingerprint".into(),
+                ..input
+            })
+            .await
+            .is_err());
+        assert!(app.queue(&snapshot.id).await.unwrap().comments.is_empty());
+        assert_eq!(
+            fs::read(store.path().join("state.json")).unwrap(),
+            state_before
+        );
     }
 }
 
@@ -709,6 +957,7 @@ async fn removed_file_comments_remain_exportable_without_line_coordinates() {
         body: "Explain this file".into(),
         side: None,
         line: None,
+        end_line: None,
     })
     .await
     .unwrap();
@@ -758,6 +1007,7 @@ async fn conflicts_and_large_files_have_safe_summaries() {
         body: "Resolve both implementations".into(),
         side: None,
         line: None,
+        end_line: None,
     })
     .await
     .unwrap();
@@ -925,6 +1175,7 @@ async fn code_feedback_does_not_expire_when_identical_content_is_staged() {
         body: "Question".into(),
         side: None,
         line: Some(1),
+        end_line: None,
     })
     .await
     .unwrap();
@@ -976,6 +1227,7 @@ async fn submodule_updates_and_deletions_have_file_comment_summaries() {
         body: "Why update the submodule?".into(),
         side: None,
         line: None,
+        end_line: None,
     })
     .await
     .unwrap();

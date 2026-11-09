@@ -29,7 +29,12 @@ export type ViewportState = {
   >;
   symbol: SymbolPosition | null;
   selection: { id: string; side: "old" | "new"; range: SourceRange } | null;
-  selectedLine: { id: string; line: number; side?: "old" | "new" } | null;
+  selectedLine: {
+    id: string;
+    line: number;
+    endLine?: number;
+    side?: "old" | "new";
+  } | null;
 };
 export type NavigationPage = {
   documentId: string;

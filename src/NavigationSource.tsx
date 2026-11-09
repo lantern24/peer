@@ -16,7 +16,12 @@ export const NavigationSource = forwardRef<
     snapshot: Snapshot;
     file: NavigationFile;
     queue: ReviewQueue;
-    onComment: (id: string, line?: number, side?: "old" | "new") => void;
+    onComment: (
+      id: string,
+      line?: number,
+      side?: "old" | "new",
+      endLine?: number,
+    ) => void;
     preferences: Preferences;
     theme: Theme;
     onLoad: () => void;
@@ -130,7 +135,7 @@ export const NavigationSource = forwardRef<
       onLoad={(_id, force) => {
         if (force) onLoad();
       }}
-      onComment={(_id, line) => {
+      onComment={(_id, line, _side, endLine) => {
         if (reviewEntry)
           onComment(
             reviewEntry.id,
@@ -138,6 +143,7 @@ export const NavigationSource = forwardRef<
             line !== undefined && snapshot.comparison.view === "changes"
               ? file.side
               : undefined,
+            endLine,
           );
       }}
       onReviewed={() => {}}

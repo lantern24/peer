@@ -128,6 +128,7 @@ async fn commit_diff_and_feedback_use_frozen_parent_and_commit_contents() {
             body: "Review the historical value".into(),
             side: Some("new".into()),
             line: Some(1),
+            end_line: None,
         })
         .await
         .unwrap();

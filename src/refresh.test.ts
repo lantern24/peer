@@ -34,7 +34,7 @@ const state: ViewportState = {
       end: { line: 20, character: 7 },
     },
   },
-  selectedLine: { id: "b", line: 20, side: "old" },
+  selectedLine: { id: "b", line: 20, endLine: 23, side: "old" },
 };
 const previous = [file("a"), file("b"), file("c")];
 describe("refresh viewport", () => {
@@ -49,8 +49,10 @@ describe("refresh viewport", () => {
     expect(result.fingerprints).toEqual({ renamed: "before" });
     expect(result.manuallyLoaded).toEqual(["renamed"]);
     expect(result.selectedLine).toEqual({
-      ...state.selectedLine,
       id: "renamed",
+      line: 20,
+      endLine: 23,
+      side: "old",
     });
     expect(result.symbol).toEqual({
       id: "renamed",

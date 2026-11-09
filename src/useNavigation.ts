@@ -68,6 +68,7 @@ export function useNavigation({
     state?: ViewportState;
     id?: string;
     line?: number;
+    endLine?: number;
     side?: "old" | "new";
     range?: NavigationPage["range"];
   } | null>(null);
@@ -272,7 +273,12 @@ export function useNavigation({
   );
 
   const review = useCallback(
-    async (id: string, line?: number, side?: "old" | "new") => {
+    async (
+      id: string,
+      line?: number,
+      side?: "old" | "new",
+      endLine?: number,
+    ) => {
       const active = current.current.snapshot;
       if (!active) return;
       const target = { ...diagnosticFile(active, id), line, side };
@@ -298,7 +304,7 @@ export function useNavigation({
         setFile(null);
         if (origin.page) setMountEpoch((value) => value + 1);
         current.current.activateFile(id);
-        pending.current = { id, line, side };
+        pending.current = { id, line, side, endLine };
         setEpoch((value) => value + 1);
         recordDiagnostic("navigation.activated", target);
       } catch (error) {
@@ -398,7 +404,7 @@ export function useNavigation({
     else if (action.id && action.range)
       viewer.current.reveal(action.id, action.range, action.side);
     else if (action.id)
-      viewer.current.jump(action.id, action.line, action.side);
+      viewer.current.jump(action.id, action.line, action.side, action.endLine);
   }, [epoch, file, page, selected, viewer]);
   useEffect(() => {
     const keys = (event: KeyboardEvent) => {
