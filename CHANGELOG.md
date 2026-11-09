@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.5.0](https://github.com/lantern24/peer/compare/v0.4.0...v0.5.0) (2026-11-09)
+
+
+### Features
+
+* **issue-38:** Support multi-line review comments ([#41](https://github.com/lantern24/peer/issues/41)) ([9890bc0](https://github.com/lantern24/peer/commit/9890bc06979e06c3e924b526099bead0c8025f1c)), closes [#38](https://github.com/lantern24/peer/issues/38)
+
+
+### Bug Fixes
+
+* **ui:** Improve Refresh placement and Find selection ([#39](https://github.com/lantern24/peer/issues/39)) ([e1454de](https://github.com/lantern24/peer/commit/e1454de2a20ff930270330ce4e027abbc24e40db))
+
 ## [0.4.0](https://github.com/lantern24/peer/compare/v0.3.1...v0.4.0) (2026-10-28)
 
 
