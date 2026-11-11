@@ -55,7 +55,7 @@ Use the gutter **+** to comment on a line, or a file header's comment button for
 
 To comment on multiple lines, hold **⌘** on macOS or **Ctrl** on Windows/Linux and click the first and last **line numbers**, then click the gutter **+** at the bottom of the selection. Both endpoints are included, in either click order. Ranges stay within one file and one diff side; choosing another file or side starts a new selection. A plain line-number click replaces the range with a single line. Selecting a location and clicking **+** reuses any existing draft text. Cmd/Ctrl-click on source text still navigates to its definition.
 
-You can also select source text across multiple lines, then click **+** beside a selected line. The feedback box uses the selected lines, not just the line beside **+**. A selection ending at the beginning of the next line excludes that line. Text selections must stay within one file and one diff side.
+You can also select source text across multiple lines, then click **+** beside a selected line. The feedback box uses the selected lines, not just the line beside **+**. A selection ending at the beginning of the next line excludes that line. Text selections must stay within one file and one diff side. In unified diffs, unchanged lines use the clicked **+** button's side and line numbers; **Navigate shared lines: A/B** affects navigation only.
 
 Drafts and saved range comments show their start/end lines. Saved comments retain the complete selected source as context. Clicking a saved comment's path returns to and highlights its range, unless it is outdated.
 

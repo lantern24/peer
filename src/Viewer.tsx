@@ -255,6 +255,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
         event?: MouseEvent,
         fallback = 0,
         explicitSide?: "old" | "new",
+        sharedSide?: "old" | "new",
       ): SymbolPosition => {
         const current = refs.current;
         const diff = current.snapshot.comparison.view === "changes";
@@ -267,7 +268,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
         const side = !diff
           ? (current.navigationSide ?? "new")
           : unifiedContext
-            ? (current.navigationSide ?? "new")
+            ? (sharedSide ?? current.navigationSide ?? "new")
             : (explicitSide ??
               (type === "change-deletion" ||
               column?.hasAttribute("data-deletions")
@@ -336,64 +337,74 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
       }
     }, [positionAt]);
 
-    const sourceSelection = useCallback((): ViewportState["selection"] => {
-      // Selection APIs differ between WKWebView versions. Read actual source
-      // text endpoints, including selections crossing syntax/whitespace spans.
-      const selection = window.getSelection();
-      const roots = Array.from(
-        surface.current?.querySelectorAll("diffs-container") ?? [],
-      ).flatMap((host) => (host.shadowRoot ? [host.shadowRoot] : []));
-      for (const root of roots) {
-        const local =
-          (
-            root as ShadowRoot & { getSelection?: () => Selection | null }
-          ).getSelection?.() ?? selection;
-        let composed: StaticRange[] | undefined;
-        if (local?.getComposedRanges) {
-          try {
-            composed = local.getComposedRanges({ shadowRoots: roots });
-          } catch (error) {
-            if (!(error instanceof TypeError)) throw error;
-            recordDiagnostic(
-              "selection.legacy",
-              diagnosticFile(refs.current.snapshot, refs.current.selected),
-            );
-            // Older WebKit accepts individual ShadowRoots and rejects the
-            // options object. Preserve its selection when capturing history.
-            const legacy = local as Selection & {
-              getComposedRanges: (
-                ...shadowRoots: ShadowRoot[]
-              ) => StaticRange[];
-            };
-            composed = legacy.getComposedRanges(...roots);
+    const sourceSelection = useCallback(
+      (sharedSide?: "old" | "new"): ViewportState["selection"] => {
+        // Selection APIs differ between WKWebView versions. Read actual source
+        // text endpoints, including selections crossing syntax/whitespace spans.
+        const selection = window.getSelection();
+        const roots = Array.from(
+          surface.current?.querySelectorAll("diffs-container") ?? [],
+        ).flatMap((host) => (host.shadowRoot ? [host.shadowRoot] : []));
+        for (const root of roots) {
+          const local =
+            (
+              root as ShadowRoot & { getSelection?: () => Selection | null }
+            ).getSelection?.() ?? selection;
+          let composed: StaticRange[] | undefined;
+          if (local?.getComposedRanges) {
+            try {
+              composed = local.getComposedRanges({ shadowRoots: roots });
+            } catch (error) {
+              if (!(error instanceof TypeError)) throw error;
+              recordDiagnostic(
+                "selection.legacy",
+                diagnosticFile(refs.current.snapshot, refs.current.selected),
+              );
+              // Older WebKit accepts individual ShadowRoots and rejects the
+              // options object. Preserve its selection when capturing history.
+              const legacy = local as Selection & {
+                getComposedRanges: (
+                  ...shadowRoots: ShadowRoot[]
+                ) => StaticRange[];
+              };
+              composed = legacy.getComposedRanges(...roots);
+            }
           }
-        }
-        const range =
-          composed?.[0] ?? (local?.rangeCount ? local.getRangeAt(0) : null);
-        if (!range) continue;
-        const endpoint = (node: Node, offset: number) => {
-          const element = node instanceof Element ? node : node.parentElement;
-          const line = element?.closest<HTMLElement>(
-            "[data-line][data-line-type]",
-          );
-          if (!line || line.getRootNode() !== root) return null;
-          const id = (root.host as HTMLElement).dataset.navigationId;
-          const character = textOffset(line, node, offset);
-          return id && character !== null
-            ? positionAt(line, id, undefined, character)
-            : null;
-        };
-        const start = endpoint(range.startContainer, range.startOffset);
-        const end = endpoint(range.endContainer, range.endOffset);
-        if (start && end && start.side === end.side)
-          return {
-            id: start.id,
-            side: start.side,
-            range: { start: start.position, end: end.position },
+          const range =
+            composed?.[0] ?? (local?.rangeCount ? local.getRangeAt(0) : null);
+          if (!range) continue;
+          const endpoint = (node: Node, offset: number) => {
+            const element = node instanceof Element ? node : node.parentElement;
+            const line = element?.closest<HTMLElement>(
+              "[data-line][data-line-type]",
+            );
+            if (!line || line.getRootNode() !== root) return null;
+            const id = (root.host as HTMLElement).dataset.navigationId;
+            const character = textOffset(line, node, offset);
+            return id && character !== null
+              ? positionAt(
+                  line,
+                  id,
+                  undefined,
+                  character,
+                  undefined,
+                  sharedSide,
+                )
+              : null;
           };
-      }
-      return null;
-    }, [positionAt]);
+          const start = endpoint(range.startContainer, range.startOffset);
+          const end = endpoint(range.endContainer, range.endOffset);
+          if (start && end && start.side === end.side)
+            return {
+              id: start.id,
+              side: start.side,
+              range: { start: start.position, end: end.position },
+            };
+        }
+        return null;
+      },
+      [positionAt],
+    );
     const sourcePosition = useCallback((): SymbolPosition | null => {
       const selection = sourceSelection();
       return selection
@@ -1547,16 +1558,18 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
                       ? "deletions"
                       : "additions"
                     : undefined;
+                const feedbackSide =
+                  snapshot.comparison.view === "changes"
+                    ? side === "deletions"
+                      ? "old"
+                      : "new"
+                    : (props.navigationSide ?? "new");
                 let selection = viewer.current?.getSelectedLines();
-                const textSelection = sourceSelection();
+                // Shared lines use the comment's coordinates, not navigation's A/B choice.
+                const textSelection = sourceSelection(feedbackSide);
                 if (
                   textSelection?.id === item.id &&
-                  textSelection.side ===
-                    (snapshot.comparison.view === "changes"
-                      ? side === "deletions"
-                        ? "old"
-                        : "new"
-                      : (props.navigationSide ?? "new"))
+                  textSelection.side === feedbackSide
                 ) {
                   const { start, end } = textSelection.range;
                   if (
@@ -1590,9 +1603,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
                   item.id,
                   start,
                   snapshot.comparison.view === "changes"
-                    ? side === "deletions"
-                      ? "old"
-                      : "new"
+                    ? feedbackSide
                     : undefined,
                   end > start ? end : undefined,
                 );
