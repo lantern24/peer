@@ -1202,16 +1202,33 @@ describe("Peer in the native webview", () => {
           () =>
             browser.execute(
               (path, type, exclusiveEnd) => {
-                const root = document
+                const host = document
                   .querySelector(`[data-file-path="${path}"]`)
-                  ?.closest("diffs-container")?.shadowRoot;
+                  ?.closest("diffs-container");
+                const root = host?.shadowRoot;
                 const first = root?.querySelector(
                   `[data-code] [data-line="2"][data-line-type="${type}"]`,
                 );
                 const last = root?.querySelector(
                   `[data-code] [data-line="${exclusiveEnd ? 5 : 4}"][data-line-type="${type}"]`,
                 );
-                if (!first || !last) return false;
+                const gutter = root?.querySelector(
+                  `[data-column-number="4"][data-line-type="${type}"]`,
+                );
+                if (!first || !last || !gutter) return false;
+                gutter.dispatchEvent(
+                  new PointerEvent("pointermove", {
+                    bubbles: true,
+                    composed: true,
+                    pointerType: "mouse",
+                    pointerId: 1,
+                  }),
+                );
+                const button = host?.querySelector<HTMLButtonElement>(
+                  '[aria-label="Comment on line"]',
+                );
+                if (!button || !button.getBoundingClientRect().height)
+                  return false;
                 const firstWalker = document.createTreeWalker(
                   first,
                   NodeFilter.SHOW_TEXT,
@@ -1245,6 +1262,9 @@ describe("Peer in the native webview", () => {
                   throw new Error(
                     "Source selection did not include its first line",
                   );
+                // Activate before a late highlight render can replace the
+                // selected text nodes between separate WebDriver commands.
+                button.click();
                 return true;
               },
               path,
@@ -1253,7 +1273,6 @@ describe("Peer in the native webview", () => {
             ),
           { timeoutMsg: "Selected source lines did not finish rendering" },
         );
-        await clickLineComment(4, type);
         await expect($(".comment-composer .comment-location")).toHaveText(
           location,
         );
