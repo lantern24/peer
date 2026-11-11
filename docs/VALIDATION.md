@@ -8,7 +8,9 @@ Reference machine: Apple M2, macOS 26.5.2 (25F84 / Darwin 25.5.0). The native ap
 
 Waiting for rows alone passed one hosted run, but the companion run opened feedback at `line 4` rather than `lines 2–4`. A native timing probe confirmed that a later render detached both selected text nodes before the separate WebDriver click began. Waiting for spans alone did not eliminate this race. The fixture now waits for both endpoint rows, then establishes the selection and activates the gutter **+** in the same browser task. Range labels, saved context, single-line fallback assertions, and timeouts are unchanged; the existing full-pointer gutter regressions remain intact. No application code changed.
 
-After removing the temporary probes, all ten focused source-selection and gutter-range scenarios passed locally in macOS WKWebView using the existing native test executable: Code and unified/split diffs on both sides. This is local verification, not a successful hosted-CI run.
+A subsequent [hosted run](https://github.com/lantern24/peer/actions/runs/42942182204/job/130266361920) passed every source-selection case but lost the first endpoint in the older Code gutter-range scenario. Its helper retained the pressed DOM node across an animation frame. It now hit-tests again at the same coordinates before releasing and clicking, so replacement gutters receive the events. A temporary probe forcibly replaced each endpoint gutter between press and release; the Code range scenario still passed. The probe was removed.
+
+After removing the temporary probes, all fourteen focused source-selection and gutter-range scenarios passed locally in macOS WKWebView using the existing native test executable: Code and unified/split diffs on both sides, draft retargeting, and emulated Ctrl selection. This is local verification, not a successful hosted-CI run.
 
 ## Multi-line review comments — 2026-11-07 JST
 

@@ -157,17 +157,24 @@ async function clickRangeEndpoint(
         clientX: rect.left + rect.width / 2,
         clientY: rect.top + rect.height / 2,
       };
-      let target = document.elementFromPoint(pointer.clientX, pointer.clientY);
-      while (target?.shadowRoot) {
-        const inner = target.shadowRoot.elementFromPoint(
+      const hitTarget = () => {
+        let target = document.elementFromPoint(
           pointer.clientX,
           pointer.clientY,
         );
-        if (!inner || inner === target) break;
-        target = inner;
-      }
-      if (!target || !gutter.contains(target))
-        throw new Error("Range endpoint gutter is not hit-testable");
+        while (target?.shadowRoot) {
+          const inner = target.shadowRoot.elementFromPoint(
+            pointer.clientX,
+            pointer.clientY,
+          );
+          if (!inner || inner === target) break;
+          target = inner;
+        }
+        if (!target || !root?.querySelector(selector)?.contains(target))
+          throw new Error("Range endpoint gutter is not hit-testable");
+        return target;
+      };
+      let target = hitTarget();
       target.dispatchEvent(new PointerEvent("pointermove", pointer));
       const pressed = target.dispatchEvent(
         new PointerEvent("pointerdown", { ...pointer, buttons: 1 }),
@@ -179,6 +186,9 @@ async function clickRangeEndpoint(
       await new Promise<void>((resolve) =>
         requestAnimationFrame(() => resolve()),
       );
+      // Highlighting can replace the gutter during the frame. Native mouse
+      // release/click events hit the current DOM, not the detached pressed node.
+      target = hitTarget();
       target.dispatchEvent(new PointerEvent("pointerup", pointer));
       target.dispatchEvent(new MouseEvent("mouseup", pointer));
       target.dispatchEvent(new MouseEvent("click", pointer));
