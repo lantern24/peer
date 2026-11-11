@@ -1530,6 +1530,8 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
                 // Keep the renderer's line-selection gesture from moving the
                 // slotted + button before its click can open the composer.
                 event.stopPropagation();
+                // Preserve source text selection until the click reads its range.
+                event.preventDefault();
               }}
               onClick={() => {
                 const hovered = getHoveredLine();
@@ -1539,8 +1541,39 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
                   loaded[item.id].content.deferred
                 )
                   return;
-                const side = "side" in hovered ? hovered.side : undefined;
-                const selection = viewer.current?.getSelectedLines();
+                const side =
+                  "side" in hovered
+                    ? hovered.side === "deletions"
+                      ? "deletions"
+                      : "additions"
+                    : undefined;
+                let selection = viewer.current?.getSelectedLines();
+                const textSelection = sourceSelection();
+                if (
+                  textSelection?.id === item.id &&
+                  textSelection.side ===
+                    (snapshot.comparison.view === "changes"
+                      ? side === "deletions"
+                        ? "old"
+                        : "new"
+                      : (props.navigationSide ?? "new"))
+                ) {
+                  const { start, end } = textSelection.range;
+                  if (
+                    start.line !== end.line ||
+                    start.character !== end.character
+                  ) {
+                    selection = {
+                      id: item.id,
+                      range: {
+                        start: start.line + 1,
+                        // Text ranges exclude their endpoint at column zero.
+                        end: end.line + (end.character > 0 ? 1 : 0),
+                        side,
+                      },
+                    };
+                  }
+                }
                 const range = selection?.range;
                 const inRange =
                   selection?.id === item.id &&
