@@ -2,6 +2,16 @@
 
 Reference machine: Apple M2, macOS 26.5.2 (25F84 / Darwin 25.5.0). The native app uses WKWebView with a configured 1440 × 940 window. The test-only configuration keeps its window above other windows to avoid occlusion-related rendering pauses; production windows retain normal behavior. Development tools: Rust 1.88 and Node.js 26.7.
 
+## Source-selection fixture readiness — 2026-11-11 JST
+
+[PR #42's desktop job](https://github.com/lantern24/peer/actions/runs/42938735641/job/130255141782) failed while locating the Code selection endpoints immediately after switching views. Snapshot readiness does not guarantee that the asynchronously loaded source has rendered. The companion pull-request run failed at the same setup step.
+
+Waiting for rows alone passed one hosted run, but the companion run opened feedback at `line 4` rather than `lines 2–4`. A native timing probe confirmed that a later render detached both selected text nodes before the separate WebDriver click began. Waiting for spans alone did not eliminate this race. The fixture now waits for both endpoint rows, then establishes the selection and activates the gutter **+** in the same browser task. Range labels, saved context, single-line fallback assertions, and timeouts are unchanged; the existing full-pointer gutter regressions remain intact. No application code changed.
+
+A subsequent [hosted run](https://github.com/lantern24/peer/actions/runs/42942182204/job/130266361920) passed every source-selection case but lost the first endpoint in the older Code gutter-range scenario. Its helper retained the pressed DOM node across an animation frame. It now hit-tests again at the same coordinates before releasing and clicking, so replacement gutters receive the events. A temporary probe forcibly replaced each endpoint gutter between press and release; the Code range scenario still passed. The probe was removed.
+
+After removing the temporary probes, all fourteen focused source-selection and gutter-range scenarios passed locally in macOS WKWebView using the existing native test executable: Code and unified/split diffs on both sides, draft retargeting, and emulated Ctrl selection. This is local verification, not a successful hosted-CI run.
+
 ## Multi-line review comments — 2026-11-07 JST
 
 Issue #38 adds Cmd/Ctrl-click range endpoints on line numbers, followed by the gutter **+**. The inclusive range stays on one file and diff side. Saved anchors retain the full selected source and surrounding context, and concise exports include `endLine` only for multi-line comments. Existing single-line/file comments remain compatible.

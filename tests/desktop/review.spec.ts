@@ -117,6 +117,92 @@ async function addFileComment(body: string) {
 }
 
 type RangeLineType = "context" | "change-addition" | "change-deletion";
+type SourceLine = { line: number; type: RangeLineType };
+
+async function commentOnSourceSelection({
+  start,
+  end,
+  comment,
+  path = "src/module-000.ts",
+  endAtLineStart = false,
+}: {
+  start: SourceLine;
+  end: SourceLine;
+  comment: SourceLine;
+  path?: string;
+  endAtLineStart?: boolean;
+}) {
+  await browser.waitUntil(
+    () =>
+      browser.execute(
+        (path, start, end, comment, endAtLineStart) => {
+          const host = document
+            .querySelector(`[data-file-path="${path}"]`)
+            ?.closest("diffs-container");
+          const root = host?.shadowRoot;
+          const first = root?.querySelector(
+            `[data-code] [data-line="${start.line}"][data-line-type="${start.type}"]`,
+          );
+          const last = root?.querySelector(
+            `[data-code] [data-line="${end.line}"][data-line-type="${end.type}"]`,
+          );
+          const gutter = root?.querySelector(
+            `[data-column-number="${comment.line}"][data-line-type="${comment.type}"]`,
+          );
+          if (!first || !last || !gutter) return false;
+          gutter.dispatchEvent(
+            new PointerEvent("pointermove", {
+              bubbles: true,
+              composed: true,
+              pointerType: "mouse",
+              pointerId: 1,
+            }),
+          );
+          const button = host?.querySelector<HTMLButtonElement>(
+            '[aria-label="Comment on line"]',
+          );
+          if (!button || !button.getBoundingClientRect().height) return false;
+          const firstWalker = document.createTreeWalker(
+            first,
+            NodeFilter.SHOW_TEXT,
+          );
+          const lastWalker = document.createTreeWalker(
+            last,
+            NodeFilter.SHOW_TEXT,
+          );
+          const firstTextNode = firstWalker.nextNode();
+          let lastTextNode = lastWalker.nextNode();
+          if (!endAtLineStart) {
+            let next: Node | null;
+            while ((next = lastWalker.nextNode())) lastTextNode = next;
+          }
+          if (!firstTextNode || !lastTextNode)
+            throw new Error("Source selection has no text endpoints");
+          const selection = window.getSelection();
+          if (!selection) throw new Error("Source selection is unavailable");
+          selection.setBaseAndExtent(
+            lastTextNode,
+            endAtLineStart ? 0 : (lastTextNode.textContent?.length ?? 0),
+            firstTextNode,
+            0,
+          );
+          // WebKit can report isCollapsed for a selection inside a shadow root.
+          const firstText = first.textContent?.trim();
+          if (!firstText || !selection.toString().includes(firstText))
+            throw new Error("Source selection did not include its first line");
+          // Select and activate together before highlighting can replace nodes.
+          button.click();
+          return true;
+        },
+        path,
+        start,
+        end,
+        comment,
+        endAtLineStart,
+      ),
+    { timeoutMsg: "Selected source lines did not finish rendering" },
+  );
+}
 
 async function clickRangeEndpoint(
   line: number,
@@ -157,17 +243,24 @@ async function clickRangeEndpoint(
         clientX: rect.left + rect.width / 2,
         clientY: rect.top + rect.height / 2,
       };
-      let target = document.elementFromPoint(pointer.clientX, pointer.clientY);
-      while (target?.shadowRoot) {
-        const inner = target.shadowRoot.elementFromPoint(
+      const hitTarget = () => {
+        let target = document.elementFromPoint(
           pointer.clientX,
           pointer.clientY,
         );
-        if (!inner || inner === target) break;
-        target = inner;
-      }
-      if (!target || !gutter.contains(target))
-        throw new Error("Range endpoint gutter is not hit-testable");
+        while (target?.shadowRoot) {
+          const inner = target.shadowRoot.elementFromPoint(
+            pointer.clientX,
+            pointer.clientY,
+          );
+          if (!inner || inner === target) break;
+          target = inner;
+        }
+        if (!target || !root?.querySelector(selector)?.contains(target))
+          throw new Error("Range endpoint gutter is not hit-testable");
+        return target;
+      };
+      let target = hitTarget();
       target.dispatchEvent(new PointerEvent("pointermove", pointer));
       const pressed = target.dispatchEvent(
         new PointerEvent("pointerdown", { ...pointer, buttons: 1 }),
@@ -179,6 +272,9 @@ async function clickRangeEndpoint(
       await new Promise<void>((resolve) =>
         requestAnimationFrame(() => resolve()),
       );
+      // Highlighting can replace the gutter during the frame. Native mouse
+      // release/click events hit the current DOM, not the detached pressed node.
+      target = hitTarget();
       target.dispatchEvent(new PointerEvent("pointerup", pointer));
       target.dispatchEvent(new MouseEvent("mouseup", pointer));
       target.dispatchEvent(new MouseEvent("click", pointer));
@@ -1094,6 +1190,109 @@ describe("Peer in the native webview", () => {
     await click('[aria-label="Close dialog"]');
   });
 
+  it("anchors shared-line feedback to its gutter side, not the navigation side", async () => {
+    const path = "src/module-000.ts";
+    const source = originalFiles.get(path);
+    if (source === undefined) throw new Error("Missing shared-line fixture");
+    const newSource = "// feedback offset 1\n// feedback offset 2\n" + source;
+    const oldSource = execFileSync("git", ["show", `HEAD:${path}`], {
+      cwd: process.env.PEER_TEST_REPO,
+      encoding: "utf8",
+    });
+    writeFileSync(join(process.env.PEER_TEST_REPO!, path), newSource);
+    await click('[aria-label="Refresh repository"]');
+    await $('[aria-label="Refresh repository"]').waitForEnabled();
+    await browser.waitUntil(() =>
+      browser.execute(
+        (path) =>
+          document
+            .querySelector(`[data-file-path="${path}"]`)
+            ?.closest("diffs-container")
+            ?.shadowRoot?.querySelector("[data-code]")
+            ?.textContent?.includes("feedback offset 1") === true,
+        path,
+      ),
+    );
+    const cases = [
+      {
+        navigationSide: "old",
+        start: { line: 3, type: "context" },
+        end: { line: 5, type: "context" },
+        comment: { line: 5, type: "context" },
+        expected: { line: 3, endLine: 5, side: "new" },
+      },
+      {
+        navigationSide: "new",
+        start: { line: 2, type: "change-deletion" },
+        end: { line: 5, type: "context" },
+        comment: { line: 2, type: "change-deletion" },
+        expected: { line: 2, endLine: 3, side: "old" },
+      },
+      {
+        navigationSide: "old",
+        start: { line: 2, type: "change-deletion" },
+        end: { line: 4, type: "change-addition" },
+        comment: { line: 4, type: "change-addition" },
+        expected: { line: 4, endLine: undefined, side: "new" },
+      },
+    ] as const;
+    for (const [index, testCase] of cases.entries()) {
+      await browser.execute((side) => {
+        const select = document.querySelector<HTMLSelectElement>(
+          '[aria-label="Navigation side for shared lines"]',
+        );
+        if (!select) throw new Error("Navigation side control is unavailable");
+        select.value = side;
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+      }, testCase.navigationSide);
+      await commentOnSourceSelection({ ...testCase, path });
+      const { line, endLine, side } = testCase.expected;
+      const location = `${side === "old" ? "Old " : ""}${endLine ? `lines ${line}–${endLine}` : `line ${line}`}`;
+      await expect($(".comment-composer .comment-location")).toHaveText(
+        location,
+      );
+      await expect(
+        $('[aria-label="Navigation side for shared lines"]'),
+      ).toHaveValue(testCase.navigationSide);
+      const body = `Shared-line side ${index}`;
+      await $('[aria-label="Comment text"]').setValue(body);
+      await click("button=Add comment");
+      await browser.waitUntil(
+        () =>
+          browser.execute(
+            (body, location) =>
+              Array.from(document.querySelectorAll(".comment-card")).some(
+                (card) =>
+                  card.textContent?.includes(body) &&
+                  card.querySelector(".comment-location")?.textContent ===
+                    location,
+              ),
+            body,
+            location,
+          ),
+        { timeoutMsg: `Saved comment "${body}" did not show "${location}"` },
+      );
+      const saved: { queues: Record<string, ReviewQueue> } = JSON.parse(
+        readFileSync(join(process.env.PEER_DATA_DIR!, "state.json"), "utf8"),
+      );
+      const comment = Object.values(saved.queues)
+        .flatMap((queue) => queue.comments)
+        .find((comment) => comment.body === body);
+      expect(comment?.anchor.line).toBe(line);
+      expect(comment?.anchor.endLine).toBe(endLine);
+      expect(comment?.anchor.side).toBe(side);
+      expect(comment?.anchor.lineText).toBe(
+        (side === "old" ? oldSource : newSource)
+          .split("\n")
+          .slice(line - 1, endLine ?? line)
+          .join("\n"),
+      );
+      await browser.saveScreenshot(
+        resolve(`test-results/shared-feedback-side-${index}.png`),
+      );
+    }
+  });
+
   for (const view of ["Code", "unified", "split"] as const) {
     for (const side of view === "Code"
       ? (["new"] as const)
@@ -1184,6 +1383,55 @@ describe("Peer in the native webview", () => {
             comment: body,
           },
         ]);
+      });
+
+      it(`uses the selected source lines for feedback in ${view} ${side}`, async () => {
+        if (view === "Code") await switchView("Code");
+        if (view === "split") await click('[aria-label="Toggle diff layout"]');
+        const type: RangeLineType =
+          view === "Code"
+            ? "context"
+            : side === "old"
+              ? "change-deletion"
+              : "change-addition";
+        const path = "src/module-000.ts";
+        const location = `${side === "old" ? "Old " : ""}lines 2–4`;
+        await commentOnSourceSelection({
+          path,
+          start: { line: 2, type },
+          end: { line: view === "Code" ? 5 : 4, type },
+          comment: { line: 4, type },
+          endAtLineStart: view === "Code",
+        });
+        await expect($(".comment-composer .comment-location")).toHaveText(
+          location,
+        );
+        await expect($('[aria-label="Comment text"]')).toBeFocused();
+        await browser.keys(`Selected source ${view} ${side}`);
+        await click("button=Add comment");
+        await expect($(".comment-card .comment-location")).toHaveText(location);
+        const source =
+          side === "old"
+            ? execFileSync("git", ["show", `HEAD:${path}`], {
+                cwd: process.env.PEER_TEST_REPO,
+                encoding: "utf8",
+              })
+            : originalFiles.get(path);
+        if (source === undefined) throw new Error("Missing source fixture");
+        expect(
+          await browser.execute(
+            () =>
+              document.querySelector(".comment-card .comment-context")
+                ?.textContent,
+          ),
+        ).toBe(source.split("\n").slice(1, 4).join("\n"));
+        await browser.saveScreenshot(
+          resolve(`test-results/selected-source-${view}-${side}.png`),
+        );
+        await clickLineComment(6, type);
+        await expect($(".comment-composer .comment-location")).toHaveText(
+          `${side === "old" ? "Old " : ""}line 6`,
+        );
       });
     }
 
