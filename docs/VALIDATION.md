@@ -2,6 +2,14 @@
 
 Reference machine: Apple M2, macOS 26.5.2 (25F84 / Darwin 25.5.0). The native app uses WKWebView with a configured 1440 × 940 window. The test-only configuration keeps its window above other windows to avoid occlusion-related rendering pauses; production windows retain normal behavior. Development tools: Rust 1.88 and Node.js 26.7.
 
+## Source-selection fixture readiness — 2026-11-11 JST
+
+[PR #42's desktop job](https://github.com/lantern24/peer/actions/runs/42938735641/job/130255141782) failed while locating the Code selection endpoints immediately after switching views. Snapshot readiness does not guarantee that the asynchronously loaded source has rendered. The companion pull-request run failed at the same setup step.
+
+The source-selection fixture now waits for both endpoint rows and establishes the selection in the same browser task. Range labels, saved context, single-line fallback assertions, and timeouts are unchanged; no application code changed.
+
+All five focused source-selection scenarios passed locally in macOS WKWebView using the existing native test executable: Code and unified/split diffs on both sides. This is local verification, not a successful hosted-CI run.
+
 ## Multi-line review comments — 2026-11-07 JST
 
 Issue #38 adds Cmd/Ctrl-click range endpoints on line numbers, followed by the gutter **+**. The inclusive range stays on one file and diff side. Saved anchors retain the full selected source and surrounding context, and concise exports include `endLine` only for multi-line comments. Existing single-line/file comments remain compatible.

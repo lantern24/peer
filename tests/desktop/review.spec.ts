@@ -1197,53 +1197,61 @@ describe("Peer in the native webview", () => {
               : "change-addition";
         const path = "src/module-000.ts";
         const location = `${side === "old" ? "Old " : ""}lines 2–4`;
-        await browser.execute(
-          (path, type, exclusiveEnd) => {
-            const root = document
-              .querySelector(`[data-file-path="${path}"]`)
-              ?.closest("diffs-container")?.shadowRoot;
-            const first = root?.querySelector(
-              `[data-code] [data-line="2"][data-line-type="${type}"]`,
-            );
-            const last = root?.querySelector(
-              `[data-code] [data-line="${exclusiveEnd ? 5 : 4}"][data-line-type="${type}"]`,
-            );
-            if (!first || !last)
-              throw new Error("Source selection endpoints are not rendered");
-            const firstWalker = document.createTreeWalker(
-              first,
-              NodeFilter.SHOW_TEXT,
-            );
-            const lastWalker = document.createTreeWalker(
-              last,
-              NodeFilter.SHOW_TEXT,
-            );
-            const start = firstWalker.nextNode();
-            let end = lastWalker.nextNode();
-            if (!exclusiveEnd) {
-              let next: Node | null;
-              while ((next = lastWalker.nextNode())) end = next;
-            }
-            if (!start || !end)
-              throw new Error("Source selection has no text endpoints");
-            const selection = window.getSelection();
-            if (!selection) throw new Error("Source selection is unavailable");
-            // Reverse selection, including a next-line column-zero boundary.
-            selection.setBaseAndExtent(
-              end,
-              exclusiveEnd ? 0 : (end.textContent?.length ?? 0),
-              start,
-              0,
-            );
-            // WebKit's document-level isCollapsed can be true for a shadow
-            // selection; verify the selected source text instead.
-            const firstText = first.textContent?.trim();
-            if (!firstText || !selection.toString().includes(firstText))
-              throw new Error("Source selection did not include its first line");
-          },
-          path,
-          type,
-          view === "Code",
+        // Snapshot readiness precedes asynchronous source loading and rendering.
+        await browser.waitUntil(
+          () =>
+            browser.execute(
+              (path, type, exclusiveEnd) => {
+                const root = document
+                  .querySelector(`[data-file-path="${path}"]`)
+                  ?.closest("diffs-container")?.shadowRoot;
+                const first = root?.querySelector(
+                  `[data-code] [data-line="2"][data-line-type="${type}"]`,
+                );
+                const last = root?.querySelector(
+                  `[data-code] [data-line="${exclusiveEnd ? 5 : 4}"][data-line-type="${type}"]`,
+                );
+                if (!first || !last) return false;
+                const firstWalker = document.createTreeWalker(
+                  first,
+                  NodeFilter.SHOW_TEXT,
+                );
+                const lastWalker = document.createTreeWalker(
+                  last,
+                  NodeFilter.SHOW_TEXT,
+                );
+                const start = firstWalker.nextNode();
+                let end = lastWalker.nextNode();
+                if (!exclusiveEnd) {
+                  let next: Node | null;
+                  while ((next = lastWalker.nextNode())) end = next;
+                }
+                if (!start || !end)
+                  throw new Error("Source selection has no text endpoints");
+                const selection = window.getSelection();
+                if (!selection)
+                  throw new Error("Source selection is unavailable");
+                // Reverse selection, including a next-line column-zero boundary.
+                selection.setBaseAndExtent(
+                  end,
+                  exclusiveEnd ? 0 : (end.textContent?.length ?? 0),
+                  start,
+                  0,
+                );
+                // WebKit's document-level isCollapsed can be true for a shadow
+                // selection; verify the selected source text instead.
+                const firstText = first.textContent?.trim();
+                if (!firstText || !selection.toString().includes(firstText))
+                  throw new Error(
+                    "Source selection did not include its first line",
+                  );
+                return true;
+              },
+              path,
+              type,
+              view === "Code",
+            ),
+          { timeoutMsg: "Selected source lines did not finish rendering" },
         );
         await clickLineComment(4, type);
         await expect($(".comment-composer .comment-location")).toHaveText(
