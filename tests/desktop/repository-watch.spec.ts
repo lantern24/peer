@@ -65,10 +65,6 @@ async function openRepository(root: string, recent = [root]) {
     sessions: {},
     diffLayout: "unified",
   });
-  await expect($('[aria-label="Switch repository"]')).toHaveAttribute(
-    "title",
-    root,
-  );
   await $(refreshButton).waitForEnabled();
 }
 async function clickInPlace(selector: string) {

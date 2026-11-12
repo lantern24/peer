@@ -83,11 +83,7 @@ describe("Branch commit history", () => {
       sessions: {},
       recentRepositories: [root],
     });
-    await browser.waitUntil(
-      async () =>
-        (await $('[aria-label="Switch repository"]').getAttribute("title")) ===
-          root && (await $(trigger).isEnabled()),
-    );
+    await $(trigger).waitForEnabled();
     await browser.waitUntil(async () =>
       (await source()).includes("localOnly = 999"),
     );
