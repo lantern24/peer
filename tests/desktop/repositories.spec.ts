@@ -170,7 +170,11 @@ function expectRepositoryFiles(path: string) {
 }
 
 async function waitForRepository(path: string) {
-  await expect($(trigger)).toHaveAttribute("title", path, { wait: 20000 });
+  await expect($(trigger)).toHaveAttribute(
+    "title",
+    expect.stringContaining(path),
+    { wait: 20000 },
+  );
   await $(trigger).waitForEnabled();
 }
 async function switchTo(path: string) {
@@ -188,6 +192,21 @@ async function menuKey(key: string) {
       }),
     );
   }, key);
+}
+async function repositoryShortcut(options: KeyboardEventInit = {}) {
+  await browser.execute((options) => {
+    (document.activeElement ?? document.body).dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "R",
+        code: "KeyR",
+        altKey: true,
+        shiftKey: true,
+        bubbles: true,
+        cancelable: true,
+        ...options,
+      }),
+    );
+  }, options);
 }
 describe("Repository switcher", () => {
   before(async () => {
@@ -279,6 +298,79 @@ describe("Repository switcher", () => {
     await expect($(menu)).not.toExist();
   });
 
+  it("opens the repository switcher with Alt+Shift+R and Option-modified keys", async () => {
+    writeFileSync(
+      join(second, "first.ts"),
+      "export const shortcutDestination = true;\n",
+    );
+    await browser.execute(() =>
+      document
+        .querySelector<HTMLButtonElement>('[aria-label="Settings"]')
+        ?.focus(),
+    );
+    await repositoryShortcut();
+    await expect($(menu)).toBeDisplayed();
+    await expect($(`[data-repository-path="${first}"]`)).toBeFocused();
+    await menuKey("ArrowDown");
+    await repositoryShortcut({ repeat: true });
+    await expect($(`[data-repository-path="${second}"]`)).toBeFocused();
+    await repositoryShortcut();
+    await expect($(`[data-repository-path="${second}"]`)).toBeFocused();
+    await menuKey("Escape");
+    await expect($(menu)).not.toExist();
+    await expect($(trigger)).toBeFocused();
+
+    // Option+Shift changes event.key on macOS; the physical R key still opens it.
+    await repositoryShortcut({ key: "‰" });
+    await expect($(`[data-repository-path="${first}"]`)).toBeFocused();
+    await browser.saveScreenshot(
+      resolve("test-results/repository-switcher-shortcut.png"),
+    );
+    await menuKey("ArrowDown");
+    await expect($(`[data-repository-path="${second}"]`)).toBeFocused();
+    // The embedded driver's synthetic Enter does not activate native buttons.
+    await $(`[data-repository-path="${second}"]`).click();
+    await waitForRepository(second);
+    await expect($(menu)).not.toExist();
+    await switchView("Code");
+    await browser.waitUntil(() =>
+      browser.execute(() =>
+        Array.from(document.querySelectorAll("diffs-container")).some((host) =>
+          host.shadowRoot
+            ?.querySelector("[data-code]")
+            ?.textContent?.includes("export const shortcutDestination = true;"),
+        ),
+      ),
+    );
+  });
+
+  it("ignores the repository shortcut while typing, composing, or in a dialog", async () => {
+    for (const options of [{ repeat: true }, { isComposing: true }]) {
+      await repositoryShortcut(options);
+      await expect($(menu)).not.toExist();
+    }
+    await $('[data-file-path="first.ts"]').waitForExist();
+    await $('[aria-label="Comment on file first.ts"]').click();
+    const editor = $('[aria-label="Comment text"]');
+    await editor.setValue("Keep this draft");
+    await repositoryShortcut({ key: "‰" });
+    await expect($(menu)).not.toExist();
+    await expect(editor).toBeFocused();
+    await expect(editor).toHaveValue("Keep this draft");
+
+    await $('[aria-label="Settings"]').click();
+    await $('dialog[aria-label="Settings"]').waitForDisplayed();
+    await repositoryShortcut();
+    await expect($(menu)).not.toExist();
+    await expect($('dialog[aria-label="Settings"]')).toBeDisplayed();
+    await $(
+      'dialog[aria-label="Settings"] [aria-label="Close dialog"]',
+    ).click();
+    await repositoryShortcut();
+    await expect($(menu)).toBeDisplayed();
+    await menuKey("Escape");
+  });
+
   it("ignores Ctrl+T and keeps native menus active while opening a repository", async () => {
     writeFileSync(
       join(second, "first.ts"),
@@ -340,7 +432,12 @@ describe("Repository switcher", () => {
           () => (window as NativeWindow).__openGate?.waiting === true,
         ),
       );
-      await expect($(trigger)).toHaveAttribute("title", first);
+      await expect($(trigger)).toHaveAttribute(
+        "title",
+        expect.stringContaining(first),
+      );
+      await repositoryShortcut();
+      await expect($(menu)).not.toExist();
       await expect($('[aria-label="Refresh repository"]')).not.toBeEnabled();
       await browser.execute(() => {
         window.dispatchEvent(
@@ -496,7 +593,10 @@ describe("Repository switcher", () => {
     await submitForm(".repository-location");
     await expect($(".repository-location [role=alert]")).toBeDisplayed();
     await $("#repository-location").waitForEnabled();
-    await expect($(trigger)).toHaveAttribute("title", first);
+    await expect($(trigger)).toHaveAttribute(
+      "title",
+      expect.stringContaining(first),
+    );
     const rejected = await savedPreferences();
     expect(rejected.lastRepository).toBe(first);
     expect(rejected.recentRepositories).toEqual(before.recentRepositories);

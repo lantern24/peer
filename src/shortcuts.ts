@@ -123,7 +123,9 @@ export function shortcutLabel(
               : "Ctrl"
             : modifier === "Cmd"
               ? "⌘"
-              : modifier,
+              : modifier === "Alt" && platform === "mac"
+                ? "Option"
+                : modifier,
         ),
         binding.label,
       ].join("+"),

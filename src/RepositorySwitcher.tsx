@@ -8,6 +8,7 @@ import {
   X,
 } from "lucide-react";
 import { matchesShortcut, shortcutLabel } from "./shortcuts";
+import { isTyping } from "./navigation";
 
 export function RepositorySwitcher({
   current,
@@ -49,6 +50,26 @@ export function RepositorySwitcher({
   useEffect(() => {
     if (disabled) setOpen(false);
   }, [disabled]);
+  useEffect(() => {
+    const keys = (event: KeyboardEvent) => {
+      if (
+        !matchesShortcut("switchRepository", event) ||
+        event.defaultPrevented ||
+        event.isComposing ||
+        event.repeat ||
+        disabled ||
+        !paths.length ||
+        isTyping(event) ||
+        document.querySelector('[role="dialog"]')
+      )
+        return;
+      event.preventDefault();
+      initialFocus.current = 0;
+      setOpen(true);
+    };
+    window.addEventListener("keydown", keys);
+    return () => window.removeEventListener("keydown", keys);
+  }, [disabled, paths.length]);
 
   return (
     <div
@@ -80,7 +101,7 @@ export function RepositorySwitcher({
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}
-        title={current?.root ?? "Switch repository"}
+        title={`${current?.root ?? "Switch repository"} (${shortcutLabel("switchRepository")})`}
         disabled={disabled || !paths.length}
         onClick={() => {
           initialFocus.current = 0;

@@ -10,6 +10,11 @@
     "menuLabel": "Open Repository…",
     "bindings": [{ "keys": "CmdOrCtrl+O" }]
   },
+  "switchRepository": {
+    "group": "Application",
+    "action": "Show repository switcher",
+    "bindings": [{ "keys": "Alt+Shift+R", "code": "KeyR" }]
+  },
   "refreshRepository": {
     "group": "Application",
     "action": "Refresh repository",
