@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.6.0](https://github.com/lantern24/peer/compare/v0.5.0...v0.6.0) (2026-11-13)
+
+
+### Features
+
+* Add repository switcher keyboard shortcut ([#44](https://github.com/lantern24/peer/issues/44)) ([3196c9a](https://github.com/lantern24/peer/commit/3196c9a146ffaa872f0ececb2766321ce09740f7))
+
+
+### Bug Fixes
+
+* **viewer:** Use selected source lines for feedback ([#42](https://github.com/lantern24/peer/issues/42)) ([016df12](https://github.com/lantern24/peer/commit/016df129012573eea9c5904b59dd0d3d8c6c3e22))
+
 ## [0.5.0](https://github.com/lantern24/peer/compare/v0.4.0...v0.5.0) (2026-11-09)
 
 
