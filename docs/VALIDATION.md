@@ -2,6 +2,12 @@
 
 Reference machine: Apple M2, macOS 26.5.2 (25F84 / Darwin 25.5.0). The native app uses WKWebView with a configured 1440 × 940 window. The test-only configuration keeps its window above other windows to avoid occlusion-related rendering pauses; production windows retain normal behavior. Development tools: Rust 1.88 and Node.js 26.7.
 
+## Repository shortcut fixture readiness — 2026-11-13 JST
+
+[PR #44's desktop job](https://github.com/lantern24/peer/actions/runs/43325240409/job/131555931513) passed the repository-switcher scenarios but failed the history and repository-monitoring setup hooks. Both required the switcher tooltip to equal the repository path; the new shortcut hint made that incidental text comparison invalid.
+
+The hooks now rely on enabled controls and their existing rendered-source readiness checks instead of tooltip wording. No application behavior, scenario assertions, timeouts, or performance thresholds changed. The two previously blocked scenarios—paginated branch history and atomic-save notifications preserving review state—passed locally in macOS WKWebView using the existing native executable. This focused run does not establish a successful hosted-CI run.
+
 ## Source-selection fixture readiness — 2026-11-11 JST
 
 [PR #42's desktop job](https://github.com/lantern24/peer/actions/runs/42938735641/job/130255141782) failed while locating the Code selection endpoints immediately after switching views. Snapshot readiness does not guarantee that the asynchronously loaded source has rendered. The companion pull-request run failed at the same setup step.

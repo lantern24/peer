@@ -28,6 +28,30 @@ it("distinguishes literal question marks from slash and modified commands", () =
   }
 });
 
+it("opens the repository switcher with Option-modified characters but rejects other chords", () => {
+  for (const platform of ["mac", "windows", "linux"] as const) {
+    const chord = { code: "KeyR", altKey: true, shiftKey: true };
+    for (const character of ["R", "‰"])
+      expect(
+        matchesShortcut("switchRepository", key(character, chord), platform),
+      ).toBe(true);
+    for (const changed of [
+      { altKey: false },
+      { shiftKey: false },
+      { ctrlKey: true },
+      { metaKey: true },
+      { code: "KeyT" },
+    ])
+      expect(
+        matchesShortcut(
+          "switchRepository",
+          key("‰", { ...chord, ...changed }),
+          platform,
+        ),
+      ).toBe(false);
+  }
+});
+
 it("keeps platform history bindings and physical-key aliases separate", () => {
   expect(
     matchesShortcut(
