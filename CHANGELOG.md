@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/lantern24/peer/compare/v0.6.0...v0.6.1) (2026-11-25)
+
+
+### Bug Fixes
+
+* fold the file once it's reviewed ([#45](https://github.com/lantern24/peer/issues/45)) ([0793ffa](https://github.com/lantern24/peer/commit/0793ffa84296baf08987e44e1a61bbd78a8d13fe))
+
 ## [0.6.0](https://github.com/lantern24/peer/compare/v0.5.0...v0.6.0) (2026-11-13)
 
 
