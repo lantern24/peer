@@ -53,7 +53,7 @@ Settings is organized into **Appearance**, **Viewer**, **Code navigation**, and 
 
 ### Add comments and mark files reviewed
 
-Use the gutter **+** to comment on a line, or a file header's comment button for a file comment. Comments can be edited, deleted individually, or cleared from the active queue. Changes files can be marked Reviewed. Feedback is stored per worktree and branch, with distinct Code and comparison queues.
+Use the gutter **+** to comment on a line, or a file header's comment button for a file comment. Comments can be edited, deleted individually, or cleared from the active queue. Changes files can be marked Reviewed; once saved, the file automatically folds. Use its header's expand button to reopen it. Unchecking Reviewed leaves its current fold state unchanged. Feedback is stored per worktree and branch, with distinct Code and comparison queues.
 
 To comment on multiple lines, hold **⌘** on macOS or **Ctrl** on Windows/Linux and click the first and last **line numbers**, then click the gutter **+** at the bottom of the selection. Both endpoints are included, in either click order. Ranges stay within one file and one diff side; choosing another file or side starts a new selection. A plain line-number click replaces the range with a single line. Selecting a location and clicking **+** reuses any existing draft text. Cmd/Ctrl-click on source text still navigates to its definition.
 
