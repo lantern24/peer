@@ -146,7 +146,7 @@ export const NavigationSource = forwardRef<
             endLine,
           );
       }}
-      onReviewed={() => {}}
+      onReviewed={async () => false}
       onScroll={() => {}}
       onActiveFileChange={() => {}}
       onError={onError}

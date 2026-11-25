@@ -80,7 +80,7 @@ type Props = {
     side?: "old" | "new",
     endLine?: number,
   ) => void;
-  onReviewed: (id: string, checked: boolean) => void;
+  onReviewed: (id: string, checked: boolean) => Promise<boolean>;
   onScroll: (top: number) => void;
   onActiveFileChange: (snapshotId: string, id: string) => void;
   onError: (error: string) => void;
@@ -1397,7 +1397,12 @@ export const Viewer = forwardRef<ViewerHandle, Props>(
                 <input
                   type="checkbox"
                   checked={reviewed}
-                  onChange={(e) => onReviewed(item.id, e.target.checked)}
+                  onChange={async (e) => {
+                    const checked = e.target.checked;
+                    const saved = await onReviewed(item.id, checked);
+                    if (checked && saved)
+                      setCollapsed((current) => new Set(current).add(item.id));
+                  }}
                 />
                 Reviewed
               </label>

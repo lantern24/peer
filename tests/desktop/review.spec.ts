@@ -1715,6 +1715,24 @@ describe("Peer in the native webview", () => {
     await browser.waitUntil(async () =>
       (await $(".statusbar").getText()).includes("1 reviewed"),
     );
+    await expect($('[aria-label="Expand src/module-000.ts"]')).toBeDisplayed();
+    const sourceVisible = () =>
+      browser.execute(() => {
+        const code = document
+          .querySelector('[data-file-path="src/module-000.ts"]')
+          ?.closest("diffs-container")
+          ?.shadowRoot?.querySelector<HTMLElement>("[data-code]");
+        return (
+          !!code?.textContent?.includes("item0_0") &&
+          code.getBoundingClientRect().height > 0
+        );
+      });
+    await browser.waitUntil(async () => !(await sourceVisible()));
+    await clickInPlace('[aria-label="Expand src/module-000.ts"]');
+    await browser.waitUntil(sourceVisible);
+    await expect(
+      $('[data-file-path="src/module-000.ts"] .review-check input'),
+    ).toBeSelected();
     const saved: { queues: Record<string, ReviewQueue> } = JSON.parse(
       readFileSync(join(process.env.PEER_DATA_DIR!, "state.json"), "utf8"),
     );
@@ -1768,6 +1786,10 @@ describe("Peer in the native webview", () => {
     await expect($(".statusbar")).toHaveText(
       expect.stringContaining("0 reviewed"),
     );
+    await expect(
+      $('[aria-label="Collapse src/module-000.ts"]'),
+    ).toBeDisplayed();
+    await browser.waitUntil(sourceVisible);
   });
 
   for (const view of ["Code", "Changes"] as const) {

@@ -851,13 +851,17 @@ export default function App() {
   const markReviewed = useCallback(
     async (id: string, checked: boolean) => {
       const s = snapshotRef.current;
-      if (!s) return;
+      if (!s) return false;
       try {
         const value = await loadFile(id, true);
+        if (snapshotRef.current?.id !== s.id) return false;
         await api.reviewed(s.id, id, value.content.fingerprint, checked);
+        if (snapshotRef.current?.id !== s.id) return false;
         await reloadQueue();
+        return snapshotRef.current?.id === s.id;
       } catch (e) {
-        reportError(e);
+        if (snapshotRef.current?.id === s.id) reportError(e);
+        return false;
       }
     },
     [loadFile, reloadQueue, reportError],
