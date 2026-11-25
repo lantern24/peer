@@ -2653,6 +2653,11 @@ describe("Peer in the native webview", () => {
         reviewed,
       ),
     );
+    await $('[aria-label="Expand refresh-target.txt"]').waitForExist();
+    await clickInPlace('[aria-label="Expand refresh-target.txt"]');
+    await browser.waitUntil(async () =>
+      (await readSource())?.includes("Updated Code content"),
+    );
     writeFileSync(path, "Changed before requesting refresh\n");
     await clickInPlace(reviewed);
     // A stale review action still offers a refresh without silently changing its source.

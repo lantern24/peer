@@ -167,6 +167,11 @@ describe("Repository change notifications", () => {
     const reviewed = `[data-file-path="${file}"] .review-check input`;
     await clickInPlace(reviewed);
     await expect($(reviewed)).toBeSelected();
+    await $(`[aria-label="Expand ${file}"]`).waitForExist();
+    await clickInPlace(`[aria-label="Expand ${file}"]`);
+    await browser.waitUntil(async () =>
+      (await renderedSource()).includes("Current line"),
+    );
     await clickInPlace(`[aria-label="Comment on file ${file}"]`);
     await $('[aria-label="Comment text"]').setValue(
       "Unfinished review stays here",
